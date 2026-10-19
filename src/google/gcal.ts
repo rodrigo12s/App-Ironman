@@ -1,7 +1,7 @@
 import { addDaysIso } from '../domain/dates'
 import { collapseWeekly, guessKind } from '../domain/ics'
 import { toHHMM } from '../domain/schedule'
-import type { Commitment, CommitmentKind, Session, Sport } from '../domain/types'
+import type { Commitment, CommitmentKind, GoogleSettings, Session, Sport } from '../domain/types'
 
 /** Identificador público da app no Google Cloud (não é secreto) */
 export const CLIENT_ID = '929584667361-liek6tlvgdk2old9pq2hvcj0rchd2l0g.apps.googleusercontent.com'
@@ -224,6 +224,27 @@ export async function importEvents(token: string, calendarIds: string[], from: s
     }
   }
   return { count: all.length, commitments: eventsToCommitments(all, keepKinds) }
+}
+
+/** Até onde se leem os eventos: a prova ou meio ano, o que vier primeiro */
+export const importUntil = (from: string, raceDate: string) => {
+  const half = addDaysIso(from, 182)
+  return half < raceDate ? half : addDaysIso(raceDate, 1)
+}
+
+/**
+ * Lê os calendários e os eventos e devolve os compromissos que vêm do Google.
+ * Na primeira vez escolhe os calendários a ler (todos menos feriados e aniversários).
+ */
+export async function fetchCommitments(token: string, settings: GoogleSettings | undefined, old: Commitment[], from: string, raceDate: string) {
+  const cals = await listCalendars(token)
+  let next: GoogleSettings = settings ?? { importCalendars: [], writeTrainings: true, calendars: [] }
+  next = { ...next, calendars: cals.map(({ id, name, primary }) => ({ id, name, primary })) }
+  if (!settings) next = { ...next, importCalendars: defaultImport(cals, next.trainingCalendarId) }
+  const keepKinds = new Map<string, CommitmentKind>(old.filter((c) => c.source === 'google').map((c) => [c.title, c.kind]))
+  const ids = next.importCalendars.filter((id) => id !== next.trainingCalendarId)
+  const { commitments } = await importEvents(token, ids, from, importUntil(from, raceDate), keepKinds)
+  return { settings: next, commitments: [...old.filter((c) => c.source !== 'google'), ...commitments], imported: commitments.length }
 }
 
 // ---------- Escrever os treinos ----------

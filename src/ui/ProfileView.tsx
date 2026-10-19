@@ -3,8 +3,10 @@ import { addDaysIso, mondayOf, today } from '../domain/dates'
 import { parseIcs } from '../domain/ics'
 import { peakTarget } from '../domain/plan'
 import { fromHHMM, toHHMM, typicalWeek } from '../domain/schedule'
-import type { Athlete, Commitment, CommitmentKind, Injury, Level, Profile, TestResults, TimeWindow, Weekday } from '../domain/types'
+import type { Athlete, Commitment, CommitmentKind, GoogleSettings, Injury, Level, Profile, TestResults, TimeWindow, Weekday } from '../domain/types'
 import { cssPer100, formatPace, ftp, hrZones, paceZones, parsePace, powerZones, runThresholdPace, type Zone } from '../domain/zones'
+import { suggestWindows } from '../domain/suggest'
+import { ALLOWED_HOSTS, fetchCommitments, requestToken } from '../google/gcal'
 import { WEEKDAYS, fmtMinutes } from './format'
 import { KIND_LABEL, ScheduleGrid } from './ScheduleGrid'
 
@@ -47,7 +49,7 @@ export const defaultProfile = (): Profile => ({
   tests: {},
 })
 
-const STEPS = ['A prova', 'Experiência', 'Saúde e material', 'Quando treinas', 'Aulas e compromissos', 'Testes'] as const
+const STEPS = ['A prova', 'Experiência', 'Saúde e material', 'O teu calendário', 'Quando treinas', 'Testes'] as const
 
 const LEVELS: { id: Level; label: string; hint: Record<'swim' | 'bike' | 'run', string> }[] = [
   { id: 'none', label: 'Nunca fiz', hint: { swim: 'Não nado crawl seguido', bike: 'Só ando de bicicleta a passear', run: 'Não corro' } },
@@ -73,10 +75,12 @@ interface Props {
   legacy?: Pick<Profile, 'raceName' | 'raceDate' | 'tests'>
   hasPlan: boolean
   initialStep?: number
+  google?: GoogleSettings
+  onGoogle?: (g: GoogleSettings) => void
   onSave: (p: Profile, regenerate: boolean) => void
 }
 
-export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: Props) {
+export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onGoogle, onSave }: Props) {
   const [p, setP] = useState<Profile>(() => {
     if (profile) return profile
     try {
@@ -86,6 +90,8 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: P
     return { ...defaultProfile(), ...(legacy ?? {}) }
   })
   const [step, setStep] = useState(initialStep ?? 0)
+  // Enquanto não mexeres nas janelas à mão, a app vai sugerindo os horários
+  const [touched, setTouched] = useState(!!profile)
   useEffect(() => {
     if (profile) return
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(p)) } catch { /* sem armazenamento */ }
@@ -96,6 +102,17 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: P
   const free = typicalWeek(p, mondayOf(p.planStart))
   const freeTotal = free.reduce((a, b) => a + b, 0)
   const last = step === STEPS.length - 1
+  const hours = p.athlete.availableHours ?? 10
+
+  function suggest(patch: Partial<Athlete> = {}) {
+    const athlete = { ...p.athlete, ...patch }
+    setP({ ...p, athlete, schedule: { ...p.schedule, windows: suggestWindows({ ...p, athlete }, athlete.availableHours ?? 10) } })
+  }
+
+  function goTo(i: number) {
+    if (i === 4 && !touched) suggest()
+    setStep(i)
+  }
 
   function save(regenerate: boolean) {
     try { localStorage.removeItem(DRAFT_KEY) } catch { /* nada */ }
@@ -106,7 +123,7 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: P
     <div className="stack">
       <nav className="wizard-steps" aria-label="Passos do questionário">
         {STEPS.map((s, i) => (
-          <button key={s} className={i === step ? 'active' : i < step || profile ? 'done' : ''} onClick={() => setStep(i)} aria-current={i === step ? 'step' : undefined}>
+          <button key={s} className={i === step ? 'active' : i < step || profile ? 'done' : ''} onClick={() => goTo(i)} aria-current={i === step ? 'step' : undefined}>
             <span className="n">{i + 1}</span> {s}
           </button>
         ))}
@@ -126,8 +143,10 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: P
             {weeksToRace > 0 && weeksToRace < 24 && ' Para um primeiro Ironman, o ideal são 24 semanas ou mais.'}</p>
           <fieldset className="choice">
             <legend>Qual é o objetivo?</legend>
+            <div className="choice-row">
             <Radio name="goal" checked={p.athlete.goal === 'finish'} onChange={() => setA({ goal: 'finish' })} label="Terminar bem" hint="Chegar à meta inteiro e a desfrutar" />
             <Radio name="goal" checked={p.athlete.goal === 'time'} onChange={() => setA({ goal: 'time' })} label="Fazer um tempo" hint="Tenho uma meta de horas" />
+            </div>
             {p.athlete.goal === 'time' && (
               <label>Tempo-alvo (horas)<input id="q-target" type="number" min={8} max={17} step={0.5} value={p.athlete.targetHours ?? 13} onChange={(e) => setA({ targetHours: Number(e.target.value) })} /></label>
             )}
@@ -190,14 +209,30 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: P
         </section>
       )}
 
-      {step === 3 && (
+      {step === 3 && <CommitmentsStep profile={p} google={google} onGoogle={onGoogle} onChange={(commitments) => setP({ ...p, schedule: { ...p.schedule, commitments } })} />}
+      {step === 4 && (
         <section className="card">
           <h2>Quando podes treinar</h2>
-          <p className="muted small">Indica as janelas em que costumas estar livre. Aulas, ginásio e futebol entram no passo seguinte e são descontados daqui automaticamente.</p>
+          <div className="grid2">
+            <label>Horas por semana para treinar
+              <input id="q-avail" type="number" min={3} max={30} step={0.5} value={hours}
+                onChange={(e) => { const v = Number(e.target.value) || 0; if (touched) setA({ availableHours: v }); else suggest({ availableHours: v }) }} /></label>
+            <label>Dia do treino longo de bicicleta
+              <select id="q-long" value={p.athlete.longDay} onChange={(e) => { const v = Number(e.target.value) as Weekday; if (touched) setA({ longDay: v }); else suggest({ longDay: v }) }}>
+                {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+              </select></label>
+          </div>
+          <div className="suggest-box">
+            <p className="small">{touched
+              ? 'Mudaste os horários à mão. Se quiseres, a app volta a sugerir com base no teu calendário.'
+              : 'Estes horários são uma sugestão a partir do teu calendário: o bloco maior no dia do treino longo, um dia de descanso e o resto à volta das aulas. Ajusta o que quiseres.'}</p>
+            {touched && <button onClick={() => { suggest(); setTouched(false) }}>Sugerir horários de novo</button>}
+          </div>
           <div className="windows">
             {WEEKDAYS.map((d, i) => (
               <WindowsEditor key={d} day={d} windows={p.schedule.windows[i] ?? []}
                 onChange={(w) => {
+                  setTouched(true)
                   const windows = p.schedule.windows.map((x, j) => (j === i ? w : x))
                   setP({ ...p, schedule: { ...p.schedule, windows } })
                 }} />
@@ -220,16 +255,11 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: P
               <select id="q-max" value={p.athlete.maxSessionsPerDay} onChange={(e) => setA({ maxSessionsPerDay: Number(e.target.value) as 1 | 2 })}>
                 <option value={1}>1 treino</option><option value={2}>2 treinos</option>
               </select></label>
-            <label>Dia do treino longo de bicicleta
-              <select id="q-long" value={p.athlete.longDay} onChange={(e) => setA({ longDay: Number(e.target.value) as Weekday })}>
-                {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
-              </select></label>
           </div>
           <p className="muted small">A corrida longa fica no dia a seguir ao da bicicleta longa.</p>
         </section>
       )}
 
-      {step === 4 && <CommitmentsStep profile={p} onChange={(commitments) => setP({ ...p, schedule: { ...p.schedule, commitments } })} />}
 
       {step === 5 && <TestsStep tests={p.tests} athlete={p.athlete} onChange={(tests) => setP({ ...p, tests })} />}
 
@@ -244,8 +274,8 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: P
       </section>}
 
       <div className="actions wizard-actions">
-        {step > 0 && <button onClick={() => setStep(step - 1)}>Anterior</button>}
-        {!last && <button className="primary" onClick={() => setStep(step + 1)}>Seguinte</button>}
+        {step > 0 && <button onClick={() => goTo(step - 1)}>Anterior</button>}
+        {!last && <button className="primary" onClick={() => goTo(step + 1)}>Seguinte</button>}
         {(last || hasPlan) && (
           <button className={last ? 'primary' : ''} disabled={weeksToRace < 4} onClick={() => save(true)}>
             {hasPlan ? 'Guardar e gerar novo plano' : 'Criar o meu plano'}
@@ -289,9 +319,29 @@ function WindowsEditor({ day, windows, onChange }: { day: string; windows: TimeW
 
 const emptyCommitment = (): Omit<Commitment, 'id'> => ({ title: '', kind: 'football', weekday: 2, start: fromHHMM('19:00'), end: fromHHMM('20:30'), source: 'manual' })
 
-function CommitmentsStep({ profile, onChange }: { profile: Profile; onChange: (c: Commitment[]) => void }) {
+function CommitmentsStep({ profile, google, onGoogle, onChange }: { profile: Profile; google?: GoogleSettings; onGoogle?: (g: GoogleSettings) => void; onChange: (c: Commitment[]) => void }) {
   const [form, setForm] = useState(emptyCommitment())
   const [msg, setMsg] = useState<string | null>(null)
+  const [gMsg, setGMsg] = useState<string | null>(null)
+  const [gBusy, setGBusy] = useState(false)
+  const canGoogle = !!onGoogle && ALLOWED_HOSTS.includes(location.hostname)
+  const fromGoogle = profile.schedule.commitments.filter((c) => c.source === 'google').length
+
+  async function connectGoogle() {
+    setGBusy(true)
+    setGMsg(null)
+    try {
+      const token = await requestToken(!google)
+      const res = await fetchCommitments(token.value, google, list, profile.planStart, profile.raceDate)
+      onChange(res.commitments)
+      onGoogle!(res.settings)
+      setGMsg(res.imported ? `Li ${res.imported} compromissos do teu Google Calendar. Revê os tipos abaixo: o ginásio e o futebol contam como treino.` : 'Não encontrei eventos com hora nos próximos meses.')
+    } catch (e) {
+      setGMsg(e instanceof Error ? e.message : 'Não foi possível ligar ao Google.')
+    } finally {
+      setGBusy(false)
+    }
+  }
   const fileRef = useRef<HTMLInputElement>(null)
   const list = profile.schedule.commitments
 
@@ -313,16 +363,25 @@ function CommitmentsStep({ profile, onChange }: { profile: Profile; onChange: (c
 
   return (
     <section className="card">
-      <h2>Aulas, ginásio e futebol</h2>
-      <p className="muted small">O plano não marca nada por cima destes compromissos e deixa 15 min de margem antes e depois. O ginásio substitui a força do plano e o futebol conta como treino: nesse dia não há corrida e no dia seguinte não há corrida dura.</p>
+      <h2>O que já tens marcado</h2>
+      <p className="muted small">Aulas, ginásio, futebol, trabalho. O plano não marca nada por cima e deixa 15 min de margem. A seguir, a app sugere quando treinar à volta disto.</p>
 
-      <div className="import-box">
-        <b>Calendário da universidade</b>
+      {canGoogle && (
+        <div className="import-box">
+          <b>Google Calendar</b>
+          <p className="muted small">{google ? `Ligado. ${fromGoogle} compromissos vêm do Google.` : 'A forma mais rápida: a app lê os teus eventos e, depois de criar o plano, escreve os treinos num calendário à parte.'}</p>
+          <button className={google ? '' : 'primary'} disabled={gBusy} onClick={connectGoogle}>{gBusy ? 'A ler o calendário…' : google ? 'Ler de novo' : 'Ligar o Google Calendar'}</button>
+          {gMsg && <p className="small">{gMsg}</p>}
+        </div>
+      )}
+
+      <details className="import-box" open={!canGoogle}>
+        <summary><b>Ficheiro .ics</b></summary>
         <p className="muted small">Exporta o horário em formato .ics (no portal académico, ou no Outlook) e escolhe o ficheiro aqui. Os exames também entram. Se usas o Google Calendar, é mais fácil ligá-lo em Mais, Google Calendar.</p>
         <button onClick={() => fileRef.current?.click()}>Importar ficheiro .ics</button>
         <input ref={fileRef} type="file" accept=".ics,text/calendar" hidden onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} />
         {msg && <p className="small">{msg}</p>}
-      </div>
+      </details>
 
       <form className="commit-form" onSubmit={(e) => {
         e.preventDefault()

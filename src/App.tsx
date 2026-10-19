@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { reflowConflicts, setDayAvailability, skipSession } from './domain/adapt'
-import { addDaysIso, today as todayIso } from './domain/dates'
+import { today as todayIso } from './domain/dates'
 import { computeTss } from './domain/load'
 import { generatePlan } from './domain/plan'
-import type { Activity, AppState, CommitmentKind, GoogleSettings, Plan, Profile, Session } from './domain/types'
-import { currentToken, defaultImport, ensureTrainingCalendar, importEvents, listCalendars, requestToken, revoke, syncTrainings } from './google/gcal'
+import type { Activity, AppState, Plan, Profile, Session } from './domain/types'
+import { currentToken, ensureTrainingCalendar, fetchCommitments, requestToken, revoke, syncTrainings } from './google/gcal'
 import { useAppState } from './store'
 import { ActivitiesView } from './ui/ActivitiesView'
 import { CalendarView } from './ui/CalendarView'
@@ -31,12 +31,6 @@ const PAGE_TITLE: Record<Exclude<Page, null>, string> = {
   tests: 'Testes e zonas',
   backup: 'Cópia de segurança',
   google: 'Google Calendar',
-}
-
-/** Até onde se leem os eventos do Google: a prova ou meio ano, o que vier primeiro */
-const importUntil = (today: string, raceDate: string) => {
-  const half = addDaysIso(today, 182)
-  return half < raceDate ? half : addDaysIso(raceDate, 1)
 }
 
 export default function App() {
@@ -115,19 +109,13 @@ export default function App() {
     setGError(null)
     try {
       const token = await requestToken(first)
-      let settings: GoogleSettings = state.google ?? { importCalendars: [], writeTrainings: true, calendars: [] }
-      const cals = await listCalendars(token.value)
-      settings = { ...settings, calendars: cals.map(({ id, name, primary }) => ({ id, name, primary })) }
+      const res = await fetchCommitments(token.value, first ? undefined : state.google, profile.schedule.commitments, today, profile.raceDate)
+      let settings = res.settings
       if (settings.writeTrainings && token.canWrite) {
         settings = { ...settings, trainingCalendarId: await ensureTrainingCalendar(token.value, settings.trainingCalendarId) }
       }
-      if (first) settings = { ...settings, importCalendars: defaultImport(cals, settings.trainingCalendarId) }
-      const importIds = settings.importCalendars.filter((id) => id !== settings.trainingCalendarId)
-
-      const old = profile.schedule.commitments
-      const keepKinds = new Map<string, CommitmentKind>(old.filter((c) => c.source === 'google').map((c) => [c.title, c.kind]))
-      const { commitments } = await importEvents(token.value, importIds, today, importUntil(today, profile.raceDate), keepKinds)
-      const nextProfile: Profile = { ...profile, schedule: { ...profile.schedule, commitments: [...old.filter((c) => c.source !== 'google'), ...commitments] } }
+      const commitments = res.commitments.filter((c) => c.source === 'google')
+      const nextProfile: Profile = { ...profile, schedule: { ...profile.schedule, commitments: res.commitments } }
       const reflow = reflowConflicts(plan, nextProfile, today)
 
       const notes = [`${commitments.length} compromissos lidos do Google Calendar.`]
@@ -161,14 +149,17 @@ export default function App() {
   // Com a sessão do Google ainda aberta, as mudanças no plano vão logo para o calendário
   useEffect(() => {
     const g = state.google
-    if (!plan || !profile || !g?.writeTrainings || !g.trainingCalendarId) return
-    const t = setTimeout(() => {
+    if (!plan || !profile || !g?.writeTrainings) return
+    const t = setTimeout(async () => {
       const token = currentToken()
       if (!token?.canWrite || syncing.current) return
       syncing.current = true
-      syncTrainings(token.value, g.trainingCalendarId!, plan.sessions, today, profile.raceDate)
-        .catch(() => { /* fica para a próxima sincronização */ })
-        .finally(() => { syncing.current = false })
+      try {
+        // Ligaste o Google no questionário: o calendário dos treinos é criado agora, com o plano pronto
+        const calId = g.trainingCalendarId ?? await ensureTrainingCalendar(token.value)
+        if (!g.trainingCalendarId) update((s) => ({ ...s, google: s.google && { ...s.google, trainingCalendarId: calId, lastSync: new Date().toISOString() } }))
+        await syncTrainings(token.value, calId, plan.sessions, today, profile.raceDate)
+      } catch { /* fica para a próxima sincronização */ } finally { syncing.current = false }
     }, 3000)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,7 +185,7 @@ export default function App() {
         </header>
         {banners}
         {state.legacy && <div className="alert alert-info"><p>Guardámos a tua prova, os testes e os treinos. Só falta responder ao questionário.</p></div>}
-        <ProfileView profile={profile} legacy={state.legacy} hasPlan={false} onSave={saveProfile} />
+        <ProfileView profile={profile} legacy={state.legacy} hasPlan={false} google={state.google} onGoogle={(g) => update((s) => ({ ...s, google: g }))} onSave={saveProfile} />
         <Toast items={toast} onClose={() => setToast([])} />
       </div>
     )
@@ -224,7 +215,7 @@ export default function App() {
           <ActivitiesView section="backup" state={state} onAdd={() => {}} onDelete={() => {}}
             onRestore={(s) => { replace(s); setPage(null); setTab('today') }} />
         )}
-        {page === 'profile' && <ProfileView profile={profile} hasPlan initialStep={0} onSave={saveProfile} />}
+        {page === 'profile' && <ProfileView profile={profile} hasPlan initialStep={0} google={state.google} onGoogle={(g) => update((s) => ({ ...s, google: g }))} onSave={saveProfile} />}
         {page === 'tests' && <ProfileView profile={profile} hasPlan initialStep={5} onSave={saveProfile} />}
         {page === 'google' && (
           <GoogleView settings={state.google} imported={profile.schedule.commitments.filter((c) => c.source === 'google').length}

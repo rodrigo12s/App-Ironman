@@ -45,6 +45,8 @@ export interface Athlete {
   maxSessionsPerDay: 1 | 2
   /** Dia preferido para o treino longo de bicicleta */
   longDay: Weekday
+  /** Horas por semana que consegue dedicar ao treino (para sugerir os horários) */
+  availableHours?: number
 }
 
 /** Intervalo horário, em minutos desde a meia-noite */
