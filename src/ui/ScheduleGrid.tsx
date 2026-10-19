@@ -1,5 +1,5 @@
 import { addDaysIso, mondayOf, today } from '../domain/dates'
-import { BUFFER, commitmentsOn, subtract, toHHMM } from '../domain/schedule'
+import { BUFFER, busyOn, subtract, toHHMM } from '../domain/schedule'
 import type { Schedule } from '../domain/types'
 import { WEEKDAYS, fmtMinutes } from './format'
 
@@ -18,7 +18,7 @@ export function ScheduleGrid({ schedule, week = mondayOf(today()) }: { schedule:
         {[6, 9, 12, 15, 18, 21].map((h) => <span key={h} style={{ left: pct(h * 60) }}>{h}h</span>)}
       </div>
       {days.map((d, i) => {
-        const commitments = commitmentsOn(schedule, d)
+        const commitments = busyOn(schedule, d)
         const free = subtract(schedule.windows[i] ?? [], commitments, BUFFER)
         const freeMin = free.reduce((a, w) => a + w.end - w.start, 0)
         return (

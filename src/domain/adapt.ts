@@ -1,5 +1,5 @@
 import { addDaysIso, mondayOf } from './dates'
-import { allowedOn, bestSlot, estimateTss, priority } from './plan'
+import { allowedOn, bestSlot, estimateTss, fixedSessions, priority, startIn } from './plan'
 import { freeSlots, remainingSlots, subtract, toHHMM } from './schedule'
 import type { Plan, Profile, Session, TimeWindow } from './types'
 
@@ -43,7 +43,7 @@ function findSlot(plan: Plan, profile: Profile, s: Session, from: string): Slot 
     if (allowedOn(profile, s, d, sameDay)) {
       const slot = bestSlot(remainingSlots(profile, plan, d, s.id))
       if (slot && slot.end - slot.start >= need) {
-        options.push({ date: d, start: slot.start, minutes: fit(s.minutes, slot), score: slot.end - slot.start })
+        options.push({ date: d, start: startIn(slot, s.minutes, profile, d, s.kind === 'long'), minutes: fit(s.minutes, slot), score: slot.end - slot.start })
         continue
       }
     }
@@ -58,7 +58,7 @@ function findSlot(plan: Plan, profile: Profile, s: Session, from: string): Slot 
     )
     const slot = bestSlot(slots)
     if (slot && slot.end - slot.start >= need) {
-      options.push({ date: d, start: slot.start, minutes: fit(s.minutes, slot), drop: droppable, score: slot.end - slot.start - 10000 })
+      options.push({ date: d, start: startIn(slot, s.minutes, profile, d, s.kind === 'long'), minutes: fit(s.minutes, slot), drop: droppable, score: slot.end - slot.start - 10000 })
     }
   }
   options.sort((a, b) => b.score - a.score)
@@ -123,7 +123,7 @@ function refitDay(plan: Plan, profile: Profile, date: string, today: string, cha
     const same = s.start !== undefined && slots.find((w) => w.start <= s.start! && w.end >= s.start! + s.minutes)
     const slot = same || bestSlot(slots)
     if (slot && slot.end - slot.start >= s.minutes) {
-      const start = same ? s.start! : slot.start
+      const start = same ? s.start! : startIn(slot, s.minutes, profile, date, s.kind === 'long')
       if (start !== s.start) {
         next = { ...next, sessions: next.sessions.map((x) => (x.id === s.id ? { ...x, start } : x)) }
         if (s.start !== undefined) changes.push(`"${s.title}" de ${label(date)} passa para as ${toHHMM(start)}.`)
@@ -173,3 +173,22 @@ export function reflowConflicts(plan: Plan, profile: Profile, today: string): Ad
 }
 
 const sortSessions = (s: Session[]) => [...s].sort((a, b) => a.date.localeCompare(b.date) || (a.start ?? 0) - (b.start ?? 0))
+
+/**
+ * O ginásio e o futebol do plano seguem os teus eventos: se mudares a hora,
+ * apagares ou criares um, a sessão fixa acompanha (de hoje em diante).
+ */
+export function syncFixed(plan: Plan, profile: Profile, today: string): Plan {
+  const last = plan.sessions.reduce((m, x) => (x.date > m ? x.date : m), today)
+  const keep = plan.sessions.filter((x) => x.kind !== 'fixed' || x.date < today)
+  const old = new Map(plan.sessions.filter((x) => x.kind === 'fixed' && x.date >= today).map((x) => [x.id, x]))
+  const fixed: Session[] = []
+  for (let d = today; d <= last && d < profile.raceDate; d = addDaysIso(d, 1)) {
+    for (const f of fixedSessions(profile, d)) fixed.push(old.get(f.id)?.skipped ? { ...f, skipped: true } : f)
+  }
+  const same = fixed.length === old.size && fixed.every((f) => {
+    const o = old.get(f.id)
+    return o && o.start === f.start && o.minutes === f.minutes && o.title === f.title
+  })
+  return same ? plan : { ...plan, sessions: sortSessions([...keep, ...fixed]) }
+}

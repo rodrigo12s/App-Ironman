@@ -3,6 +3,7 @@ import { addDaysIso, mondayOf } from '../domain/dates'
 import { matchSessions, type SessionMatch } from '../domain/compliance'
 import { commitmentsOn, toHHMM } from '../domain/schedule'
 import type { Activity, Commitment, Plan, Profile, Session } from '../domain/types'
+import { EventForm } from './EventForm'
 import { KIND_LABEL } from './ScheduleGrid'
 import { SessionDetail, STATUS } from './WeekView'
 import { SPORT_ICON, SPORT_LABEL, WEEKDAYS, fmtDay, fmtMinutes } from './format'
@@ -15,6 +16,8 @@ interface Props {
   onSkip: (id: string) => void
   onUnskip: (id: string) => void
   onDone: (s: Session) => void
+  onEditCommitment?: (c: Commitment, patch: Partial<Commitment> | null) => void
+  onAddCommitment?: (c: Commitment) => void
 }
 
 export type CalEvent =
@@ -37,7 +40,7 @@ function eventsFor(profile: Profile, plan: Plan, activities: Activity[], from: s
   for (let d = from; d <= to; d = addDaysIso(d, 1)) {
     for (const c of commitmentsOn(profile.schedule, d)) {
       // Ginásio e futebol já aparecem como sessões fixas do plano
-      if (c.kind === 'gym' || c.kind === 'football') continue
+      if (!c.allDay && (c.kind === 'gym' || c.kind === 'football')) continue
       out.push({ type: 'commitment', id: `${d}-${c.id}`, date: d, start: c.start, end: c.end, c })
     }
   }
@@ -83,7 +86,10 @@ function lanes(events: CalEvent[]): Map<string, { lane: number; of: number }> {
   return out
 }
 
-export function CalendarView({ profile, plan, activities, today, onSkip, onUnskip, onDone }: Props) {
+const isAllDay = (e: CalEvent) => e.type === 'commitment' && !!e.c.allDay
+
+export function CalendarView({ profile, plan, activities, today, onSkip, onUnskip, onDone, onEditCommitment, onAddCommitment }: Props) {
+  const [creating, setCreating] = useState<string | null>(null)
   const [mode, setMode] = useState<'week' | 'month'>(() => {
     try { return (localStorage.getItem('ironman-cal-mode') as 'week' | 'month') || 'week' } catch { return 'week' }
   })
@@ -122,6 +128,7 @@ export function CalendarView({ profile, plan, activities, today, onSkip, onUnski
             <button onClick={() => move(1)} aria-label="Seguinte">›</button>
           </div>
           <button className="small" onClick={() => setAnchor(today)}>Hoje</button>
+          {onAddCommitment && <button className="small" onClick={() => setCreating(anchor < today ? today : anchor)}>+ Evento</button>}
         </div>
         <div className="cal-legend small muted">
           <span><i className="ev ev-swim" /> Natação</span><span><i className="ev ev-bike" /> Bicicleta</span><span><i className="ev ev-run" /> Corrida</span>
@@ -136,13 +143,26 @@ export function CalendarView({ profile, plan, activities, today, onSkip, onUnski
             onDay={(d) => { setAnchor(d); setMode('week') }} />}
 
       {sel && <DetailSheet e={sel} profile={profile} today={today} onClose={() => setSelected(null)}
-        onSkip={(id) => { onSkip(id); setSelected(null) }} onUnskip={(id) => { onUnskip(id); setSelected(null) }} onDone={onDone} />}
+        onSkip={(id) => { onSkip(id); setSelected(null) }} onUnskip={(id) => { onUnskip(id); setSelected(null) }} onDone={onDone}
+        onEditCommitment={onEditCommitment && ((c, patch) => { onEditCommitment(c, patch); setSelected(null) })} />}
+
+      {creating && onAddCommitment && (
+        <div className="sheet-backdrop" onClick={() => setCreating(null)}>
+          <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="new-ev" onClick={(ev) => ev.stopPropagation()}>
+            <header><div><h2 id="new-ev">Novo evento</h2><p className="muted small">Fica só na app. Os treinos não são marcados por cima.</p></div></header>
+            <EventForm date={creating} onCancel={() => setCreating(null)}
+              onSave={(patch) => { onAddCommitment({ id: `m-${Date.now()}`, title: 'Evento', kind: 'other', start: 540, end: 600, source: 'manual', ...patch, date: patch.date ?? creating }); setCreating(null) }} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 function WeekGrid({ from, events, today, onSelect }: { from: string; events: CalEvent[]; today: string; onSelect: (id: string) => void }) {
   const days = Array.from({ length: 7 }, (_, i) => addDaysIso(from, i))
+  const allDay = events.filter(isAllDay)
+  events = events.filter((e) => !isAllDay(e))
   const startMin = Math.min(DEFAULT_FROM, ...events.map((e) => Math.floor(e.start / 60) * 60))
   const endMin = Math.max(DEFAULT_TO, ...events.map((e) => Math.ceil(e.end / 60) * 60))
   const hours = Array.from({ length: (endMin - startMin) / 60 }, (_, i) => startMin / 60 + i)
@@ -161,6 +181,11 @@ function WeekGrid({ from, events, today, onSelect }: { from: string; events: Cal
         {days.map((d, i) => (
           <div key={d} className={`cal-dayhead ${d === today ? 'is-today' : ''}`}>
             <span>{WEEKDAYS[i].slice(0, 3)}</span><b>{Number(d.slice(8))}</b>
+            {allDay.filter((e) => e.date === d).map((e) => (
+              <button key={e.id} className={`${classOf(e)} ev-allday`} onClick={() => onSelect(e.id)} title={titleOf(e)}>
+                <span className="ev-title">{titleOf(e)}</span>
+              </button>
+            ))}
           </div>
         ))}
         <div className="cal-hours" style={{ height }}>
@@ -220,15 +245,23 @@ function MonthGrid({ from, month, events, today, onSelect, onDay }: { from: stri
   )
 }
 
-export function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip, onDone }: { e: CalEvent; profile: Profile; today: string; onClose: () => void; onSkip: (id: string) => void; onUnskip: (id: string) => void; onDone?: (s: Session) => void }) {
+export function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip, onDone, onEditCommitment }: {
+  e: CalEvent; profile: Profile; today: string; onClose: () => void; onSkip: (id: string) => void; onUnskip: (id: string) => void
+  onDone?: (s: Session) => void; onEditCommitment?: (c: Commitment, patch: Partial<Commitment> | null) => void
+}) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  const [editing, setEditing] = useState(false)
+  // Ginásio e futebol aparecem como sessões fixas: o evento de origem também se pode editar
+  const source = e.type === 'commitment' ? e.c
+    : e.type === 'session' && e.m.session.commitmentId ? profile.schedule.commitments.find((c) => c.id === e.m.session.commitmentId)
+    : undefined
   useEffect(() => {
     closeRef.current?.focus()
     const onKey = (ev: KeyboardEvent) => ev.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
-  const when = `${fmtDay(e.date, { weekday: 'long', day: 'numeric', month: 'long' })} · ${toHHMM(e.start)}–${toHHMM(e.end)}`
+  const when = `${fmtDay(e.date, { weekday: 'long', day: 'numeric', month: 'long' })} · ${isAllDay(e) ? 'dia inteiro' : `${toHHMM(e.start)}–${toHHMM(e.end)}`}`
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={(ev) => ev.stopPropagation()}>
@@ -239,7 +272,14 @@ export function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip, onDo
           </div>
           <button ref={closeRef} className="link" onClick={onClose} aria-label="Fechar">✕</button>
         </header>
-        {e.type === 'session' && (
+        {editing && source && onEditCommitment && (
+          <EventForm c={source} date={e.date} onCancel={() => setEditing(false)}
+            onSave={(patch) => onEditCommitment(source, patch)} onDelete={() => onEditCommitment(source, null)} />
+        )}
+        {!editing && source && onEditCommitment && (
+          <button className="edit-ev" onClick={() => setEditing(true)}>✎ Editar ou apagar evento</button>
+        )}
+        {!editing && e.type === 'session' && (
           <>
             <div className="chips left">
               <span className={`status ${STATUS[e.m.status].cls}`}>{STATUS[e.m.status].label}{e.m.ratio !== null && ` ${Math.round(e.m.ratio * 100)}%`}</span>
@@ -252,15 +292,16 @@ export function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip, onDo
             <SessionDetail m={e.m} profile={profile} today={today} onSkip={onSkip} onUnskip={onUnskip} onDone={onDone && ((s) => { onDone(s); onClose() })} />
           </>
         )}
-        {e.type === 'commitment' && (
+        {!editing && e.type === 'commitment' && (
           <>
             <div className="chips left"><span className="chip">{KIND_LABEL[e.c.kind]}</span><span className="chip">{e.c.source === 'google' ? 'Do Google Calendar' : e.c.source === 'ics' ? 'Do calendário importado' : 'Adicionado por ti'}</span></div>
             <p className="small">
-              {e.c.weekday !== undefined
+              {e.c.allDay ? (e.c.blocksDay ? 'Dia inteiro: neste dia não há treinos.' : 'Dia inteiro: não ocupa horas, os treinos continuam neste dia.')
+                : e.c.weekday !== undefined
                 ? `Todas as ${WEEKDAYS[e.c.weekday].toLowerCase()}s${e.c.from ? ` desde ${fmtDay(e.c.from, { day: 'numeric', month: 'short' })}` : ''}${e.c.until ? ` até ${fmtDay(e.c.until, { day: 'numeric', month: 'short' })}` : ''}.`
                 : 'Só neste dia.'}
             </p>
-            <p className="small muted">Os treinos não são marcados por cima e ficam 15 min de margem antes e depois. {e.c.source === 'google' ? 'Para mudar, altera no Google Calendar e sincroniza em Mais.' : 'Para mudar ou apagar, vai a Perfil, passo Aulas e compromissos.'}</p>
+            {!e.c.allDay && <p className="small muted">Os treinos não são marcados por cima e ficam 15 min de margem antes e depois.</p>}
           </>
         )}
         {e.type === 'activity' && (

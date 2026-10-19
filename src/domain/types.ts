@@ -45,8 +45,13 @@ export interface Athlete {
   maxSessionsPerDay: 1 | 2
   /** Dia preferido para o treino longo de bicicleta */
   longDay: Weekday
-  /** Horas por semana que consegue dedicar ao treino (para sugerir os horários) */
+  /** Horas por semana que consegue dedicar ao treino */
   availableHours?: number
+  /** Hora mais cedo e mais tarde a que aceita treinar, em minutos desde a meia-noite */
+  dayStart?: number
+  dayEnd?: number
+  /** Quando prefere treinar nos dias de semana */
+  preferredTime?: 'morning' | 'evening'
 }
 
 /** Intervalo horário, em minutos desde a meia-noite */
@@ -74,6 +79,20 @@ export interface Commitment {
   /** Datas em que não acontece (feriados, férias) */
   except?: string[]
   source: 'manual' | 'ics' | 'google'
+  /** Evento de dia inteiro: só ocupa horas se `blocksDay` */
+  allDay?: boolean
+  blocksDay?: boolean
+}
+
+/** Mudança feita na app a um evento do Google (o Google não é alterado) */
+export interface CommitmentEdit {
+  deleted?: boolean
+  title?: string
+  kind?: CommitmentKind
+  date?: string
+  start?: number
+  end?: number
+  blocksDay?: boolean
 }
 
 export interface Schedule {
@@ -169,6 +188,8 @@ export interface GoogleSettings {
   trainingCalendarId?: string
   /** Nomes dos teus calendários, para os mostrar sem pedir de novo ao Google */
   calendars: { id: string; name: string; primary?: boolean }[]
+  /** As tuas mudanças a eventos do Google, por id do evento na app */
+  edits?: Record<string, CommitmentEdit>
   /** O que veio de cada calendário na última leitura */
   lastImport?: { name: string; events: number; allDay: number; failed?: boolean }[]
   lastSync?: string

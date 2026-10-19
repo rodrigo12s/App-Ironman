@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { reflowConflicts, setDayAvailability, skipSession } from './domain/adapt'
+import { reflowConflicts, setDayAvailability, skipSession, syncFixed } from './domain/adapt'
 import { today as todayIso } from './domain/dates'
 import { computeTss } from './domain/load'
 import { generatePlan } from './domain/plan'
-import type { Activity, AppState, Plan, Profile, Session } from './domain/types'
+import type { Activity, AppState, Commitment, CommitmentEdit, Plan, Profile, Session } from './domain/types'
 import { currentToken, ensureTrainingCalendar, fetchCommitments, importSummary, requestToken, revoke, syncTrainings } from './google/gcal'
 import { useAppState } from './store'
 import { ActivitiesView } from './ui/ActivitiesView'
@@ -40,6 +40,7 @@ export default function App() {
   const [toast, setToast] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [gBusy, setGBusy] = useState(false)
+  const [pending, setPending] = useState<{ plan: Plan; changes: string[] } | null>(null)
   const [gError, setGError] = useState<string | null>(null)
   const today = todayIso()
   const { profile, plan } = state
@@ -99,8 +100,44 @@ export default function App() {
   const skip = (id: string) => applyPlan((pl, pr) => skipSession(pl, pr, id, today))
 
   /**
-   * Lê os eventos do Google, ajusta os treinos que ficaram por cima de algum
-   * e escreve o plano no calendário "Treinos Ironman".
+   * Os teus eventos mudaram: se algum treino ficou por cima de um evento,
+   * mostra os novos horários propostos. Nada muda sem aceitares.
+   */
+  function propose(pl: Plan, pr: Profile): boolean {
+    // O ginásio e o futebol acompanham logo os eventos; os outros treinos esperam pela tua resposta
+    const base = syncFixed(pl, pr, today)
+    if (base !== pl) update((s) => ({ ...s, plan: base }))
+    const r = reflowConflicts(base, pr, today)
+    if (r.changes.length) setPending(r)
+    return r.changes.length > 0
+  }
+
+  function changeCommitments(fn: (list: Commitment[]) => Commitment[], edit?: { id: string; e: CommitmentEdit }) {
+    if (!profile || !plan) return
+    const nextProfile: Profile = { ...profile, schedule: { ...profile.schedule, commitments: fn(profile.schedule.commitments) } }
+    update((s) => ({
+      ...s,
+      profile: nextProfile,
+      google: edit && s.google ? { ...s.google, edits: { ...s.google.edits, [edit.id]: { ...s.google.edits?.[edit.id], ...edit.e } } } : s.google,
+    }))
+    if (!propose(plan, nextProfile)) setToast(['Guardado. Os treinos não precisam de mudar.'])
+  }
+
+  /** Muda ou apaga (patch null) um evento. Os do Google só mudam na app. */
+  function editCommitment(c: Commitment, patch: Partial<Commitment> | null) {
+    const google = c.source === 'google'
+    if (!patch) {
+      changeCommitments((list) => list.filter((x) => x.id !== c.id), google ? { id: c.id, e: { deleted: true } } : undefined)
+      return
+    }
+    const { title, kind, date, start, end, blocksDay } = patch
+    const e: CommitmentEdit = Object.fromEntries(Object.entries({ title, kind, date, start, end, blocksDay }).filter(([, v]) => v !== undefined))
+    changeCommitments((list) => list.map((x) => (x.id === c.id ? { ...x, ...patch } : x)), google ? { id: c.id, e } : undefined)
+  }
+
+  /**
+   * Lê os eventos do Google e escreve o plano no calendário "Treinos Ironman".
+   * Se algum treino ficar por cima de um evento, propõe novos horários.
    */
   async function syncGoogle(first: boolean) {
     if (!profile || !plan || syncing.current) return
@@ -115,18 +152,17 @@ export default function App() {
         settings = { ...settings, trainingCalendarId: await ensureTrainingCalendar(token.value, settings.trainingCalendarId) }
       }
       const nextProfile: Profile = { ...profile, schedule: { ...profile.schedule, commitments: res.commitments } }
-      const reflow = reflowConflicts(plan, nextProfile, today)
 
       const notes = [importSummary(res.stats)]
-      if (reflow.changes.length) notes.push(`${reflow.changes.length === 1 ? 'Um treino mudou' : `${reflow.changes.length} treinos mudaram`} para não ficar por cima de eventos.`, ...reflow.changes.slice(0, 2))
       if (settings.writeTrainings && !token.canWrite) notes.push('Não deste autorização para escrever no calendário, por isso os treinos não foram escritos.')
       if (settings.writeTrainings && token.canWrite && settings.trainingCalendarId) {
-        const r = await syncTrainings(token.value, settings.trainingCalendarId, reflow.plan.sessions, today, profile.raceDate)
+        const r = await syncTrainings(token.value, settings.trainingCalendarId, plan.sessions, today, profile.raceDate)
         if (r.created + r.updated + r.removed > 0) notes.push(`Calendário "Treinos Ironman" atualizado: ${r.created} novos, ${r.updated} alterados, ${r.removed} apagados.`)
       }
       settings = { ...settings, lastSync: new Date().toISOString() }
-      update((s) => ({ ...s, profile: nextProfile, plan: reflow.plan, google: settings }))
+      update((s) => ({ ...s, profile: nextProfile, google: settings }))
       setToast(notes)
+      propose(plan, nextProfile)
     } catch (e) {
       setGError(e instanceof Error ? e.message : 'Não foi possível sincronizar com o Google.')
     } finally {
@@ -227,7 +263,8 @@ export default function App() {
             onSkip={skip} onUnskip={unskip} onDone={markDone} onOpenWeek={() => setPage('week')} onOpenProgress={() => setTab('progress')} />
         )}
         {!page && tab === 'calendar' && (
-          <CalendarView profile={profile} plan={plan} activities={state.activities} today={today} onSkip={skip} onUnskip={unskip} onDone={markDone} />
+          <CalendarView profile={profile} plan={plan} activities={state.activities} today={today} onSkip={skip} onUnskip={unskip} onDone={markDone}
+            onEditCommitment={editCommitment} onAddCommitment={(c) => changeCommitments((list) => [...list, c])} />
         )}
         {!page && tab === 'progress' && <ProgressView profile={profile} plan={plan} activities={state.activities} today={today} />}
         {!page && tab === 'more' && (
@@ -246,6 +283,11 @@ export default function App() {
       </main>
 
       <Toast items={toast} onClose={() => setToast([])} />
+      {pending && (
+        <ProposalSheet changes={pending.changes}
+          onAccept={() => { update((s) => ({ ...s, plan: pending.plan })); setPending(null); setToast(['Novos horários aceites.']) }}
+          onKeep={() => { setPending(null); setToast(['Os treinos ficam como estavam, mesmo por cima dos eventos.']) }} />
+      )}
 
       <nav className="bottom-nav" aria-label="Navegação principal">
         {TABS.map((t) => (
@@ -269,6 +311,24 @@ function MenuItem({ icon, title, hint, onClick }: { icon: string; title: string;
         <span className="chev" aria-hidden>›</span>
       </button>
     </li>
+  )
+}
+
+function ProposalSheet({ changes, onAccept, onKeep }: { changes: string[]; onAccept: () => void; onKeep: () => void }) {
+  return (
+    <div className="sheet-backdrop">
+      <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="proposal-title">
+        <header><div>
+          <h2 id="proposal-title">Novos horários para os treinos</h2>
+          <p className="muted small">O teu calendário mudou e {changes.length === 1 ? 'um treino ficou' : 'alguns treinos ficaram'} por cima de eventos. Proponho isto:</p>
+        </div></header>
+        <ul className="proposal">{changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
+        <div className="actions">
+          <button className="primary" onClick={onAccept}>Aceitar</button>
+          <button onClick={onKeep}>Manter como está</button>
+        </div>
+      </div>
+    </div>
   )
 }
 

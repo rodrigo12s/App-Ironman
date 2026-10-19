@@ -1,7 +1,7 @@
 import { addDaysIso, mondayOf } from '../domain/dates'
-import { collapseWeekly, guessKind } from '../domain/ics'
+import { guessKind } from '../domain/ics'
 import { toHHMM } from '../domain/schedule'
-import type { Commitment, CommitmentKind, GoogleSettings, Session, Sport } from '../domain/types'
+import type { Commitment, CommitmentEdit, CommitmentKind, GoogleSettings, Session, Sport } from '../domain/types'
 
 /** Identificador público da app no Google Cloud (não é secreto) */
 export const CLIENT_ID = '929584667361-liek6tlvgdk2old9pq2hvcj0rchd2l0g.apps.googleusercontent.com'
@@ -190,24 +190,37 @@ async function listEvents(token: string, calendarId: string, from: string, to: s
 const clock = (dt: string) => Number(dt.slice(11, 13)) * 60 + Number(dt.slice(14, 16))
 
 /**
- * Converte eventos do Google em compromissos. Ficam de fora os eventos de dia
- * inteiro (feriados, aniversários), os cancelados e os que recusaste. Um
- * evento com hora que dura vários dias ocupa cada um desses dias.
+ * Converte eventos do Google em compromissos, um a um, tal como estão no
+ * calendário. Só ficam de fora os cancelados e os que recusaste. Um evento com
+ * hora que dura vários dias ocupa cada um desses dias. Os de dia inteiro
+ * entram, mas só ocupam horas se os marcares assim na app.
  * O tipo que escolheste à mão para um evento (pelo nome) mantém-se.
  */
 export function eventsToCommitments(events: GEvent[], keepKinds: Map<string, CommitmentKind> = new Map()): Commitment[] {
   const out: Commitment[] = []
   const seen = new Set<string>()
-  const push = (e: GEvent, title: string, date: string, start: number, end: number, part: number) => {
-    const key = `${date}|${start}|${end}|${title}`
+  const push = (e: GEvent, title: string, date: string, start: number, end: number, part: number, allDay = false) => {
+    const key = `${date}|${start}|${end}|${title}|${allDay}`
     if (seen.has(key) || end - start < 1) return
     seen.add(key)
-    out.push({ id: part ? `g-${e.id}-${part}` : `g-${e.id}`, title, kind: keepKinds.get(title) ?? guessKind(title), start, end, date, source: 'google' })
+    out.push({
+      id: part ? `g-${e.id}-${part}` : `g-${e.id}`, title, kind: keepKinds.get(title) ?? guessKind(title), start, end, date, source: 'google',
+      ...(allDay ? { allDay: true } : {}),
+    })
   }
   for (const e of events) {
-    if (e.status === 'cancelled' || !e.start.dateTime || !e.end.dateTime) continue
+    if (e.status === 'cancelled') continue
     if (e.attendees?.some((a) => a.self && a.responseStatus === 'declined')) continue
     const title = e.summary?.trim() || 'Ocupado'
+    if (!e.start.dateTime || !e.end.dateTime) {
+      // Dia inteiro: a data de fim do Google é o dia a seguir ao último
+      const first = e.start.date
+      if (!first) continue
+      const last = e.end.date && e.end.date > first ? addDaysIso(e.end.date, -1) : first
+      let part = 0
+      for (let d = first; d <= last && part < 31; d = addDaysIso(d, 1), part++) push(e, title, d, 0, 24 * 60, part, true)
+      continue
+    }
     const first = e.start.dateTime.slice(0, 10)
     const last = e.end.dateTime.slice(0, 10)
     const start = clock(e.start.dateTime)
@@ -223,7 +236,18 @@ export function eventsToCommitments(events: GEvent[], keepKinds: Map<string, Com
       push(e, title, d, from, to, part)
     }
   }
-  return collapseWeekly(out)
+  return out.sort((a, b) => a.date!.localeCompare(b.date!) || a.start - b.start)
+}
+
+/** Aplica as mudanças que fizeste na app aos eventos acabados de ler do Google */
+export function applyEdits(list: Commitment[], edits: Record<string, CommitmentEdit> = {}): Commitment[] {
+  return list.flatMap((c) => {
+    const e = edits[c.id]
+    if (!e) return [c]
+    if (e.deleted) return []
+    const { deleted: _d, ...patch } = e
+    return [{ ...c, ...patch }]
+  })
 }
 
 export interface ImportStats { name: string; events: number; allDay: number; failed?: boolean }
@@ -265,7 +289,9 @@ export async function fetchCommitments(token: string, settings: GoogleSettings |
   const keepKinds = new Map<string, CommitmentKind>(old.filter((c) => c.source === 'google').map((c) => [c.title, c.kind]))
   const chosen = cals.filter((c) => next.importCalendars.includes(c.id) && c.id !== next.trainingCalendarId && c.name !== TRAINING_CALENDAR)
   // Desde segunda-feira desta semana, para a semana atual aparecer completa
-  const { commitments, stats } = await importEvents(token, chosen, mondayOf(from), importUntil(from, raceDate), keepKinds)
+  const read = await importEvents(token, chosen, mondayOf(from), importUntil(from, raceDate), keepKinds)
+  const commitments = applyEdits(read.commitments, next.edits)
+  const stats = read.stats
   next = { ...next, lastImport: stats }
   const events = stats.reduce((a, x) => a + x.events, 0)
   return { settings: next, commitments: [...old.filter((c) => c.source !== 'google'), ...commitments], imported: commitments.length, events, stats }
@@ -277,8 +303,8 @@ export function importSummary(stats: ImportStats[]): string {
   const allDay = stats.reduce((a, x) => a + x.allDay, 0)
   const failed = stats.filter((x) => x.failed).map((x) => x.name)
   return [
-    `Li ${events} eventos com hora de ${stats.length} ${stats.length === 1 ? 'calendário' : 'calendários'}.`,
-    allDay ? `${allDay} de dia inteiro (feriados, aniversários) ficaram de fora porque não ocupam horas.` : '',
+    `Li ${events + allDay} eventos de ${stats.length} ${stats.length === 1 ? 'calendário' : 'calendários'}.`,
+    allDay ? `${allDay} são de dia inteiro: aparecem no calendário mas não ocupam horas, a não ser que os marques assim.` : '',
     failed.length ? `Não consegui ler: ${failed.join(', ')}.` : '',
   ].filter(Boolean).join(' ')
 }

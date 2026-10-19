@@ -22,6 +22,14 @@ export function commitmentsOn(schedule: Schedule, date: string): Commitment[] {
   })
 }
 
+/** Compromissos que ocupam horas (os de dia inteiro só quando marcados assim) */
+export function busyOn(schedule: Schedule, date: string): Commitment[] {
+  return commitmentsOn(schedule, date).filter((c) => !c.allDay || c.blocksDay)
+}
+
+/** Janelas de treino iguais em todos os dias, a partir da hora mais cedo e mais tarde */
+export const windowsFromLimits = (start: number, end: number): TimeWindow[][] => Array.from({ length: 7 }, () => [{ start, end }])
+
 /** Tira os intervalos `cut` (com margem) aos intervalos `slots` */
 export function subtract(slots: TimeWindow[], cut: TimeWindow[], buffer = 0): TimeWindow[] {
   let out = slots.map((s) => ({ ...s }))
@@ -42,7 +50,7 @@ export function subtract(slots: TimeWindow[], cut: TimeWindow[], buffer = 0): Ti
 /** Janelas livres para treinar numa data, já sem aulas, ginásio, futebol e trabalho */
 export function freeSlots(profile: Profile, date: string, override?: number): TimeWindow[] {
   const windows = profile.schedule.windows[weekdayOf(date)] ?? []
-  const slots = subtract(windows, commitmentsOn(profile.schedule, date), BUFFER)
+  const slots = subtract(windows, busyOn(profile.schedule, date), BUFFER)
   return override === undefined ? slots : capSlots(slots, override)
 }
 
@@ -77,11 +85,11 @@ export function typicalWeek(profile: Pick<Profile, 'schedule'>, refMonday: strin
     d.setDate(d.getDate() + i)
     const date = d.toISOString().slice(0, 10)
     const windows = profile.schedule.windows[i] ?? []
-    return total(subtract(windows, commitmentsOn(profile.schedule, date), BUFFER))
+    return total(subtract(windows, busyOn(profile.schedule, date), BUFFER))
   })
 }
 
-export const isTrainingCommitment = (c: Commitment) => c.kind === 'gym' || c.kind === 'football'
+export const isTrainingCommitment = (c: Commitment) => !c.allDay && (c.kind === 'gym' || c.kind === 'football')
 
 /** Ginásio e futebol que contam como treino, por semana típica */
 export function weeklyTraining(schedule: Schedule): { gym: number; football: number; footballDays: Weekday[] } {

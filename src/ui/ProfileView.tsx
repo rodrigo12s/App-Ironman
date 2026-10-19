@@ -2,15 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { addDaysIso, mondayOf, today } from '../domain/dates'
 import { parseIcs } from '../domain/ics'
 import { peakTarget } from '../domain/plan'
-import { fromHHMM, toHHMM, typicalWeek } from '../domain/schedule'
-import type { Athlete, Commitment, CommitmentKind, GoogleSettings, Injury, Level, Profile, TestResults, TimeWindow, Weekday } from '../domain/types'
+import { fromHHMM, toHHMM, typicalWeek, windowsFromLimits } from '../domain/schedule'
+import type { Athlete, Commitment, CommitmentKind, GoogleSettings, Injury, Level, Profile, TestResults, Weekday } from '../domain/types'
 import { cssPer100, formatPace, ftp, hrZones, paceZones, parsePace, powerZones, runThresholdPace, type Zone } from '../domain/zones'
-import { suggestWindows } from '../domain/suggest'
 import { ALLOWED_HOSTS, fetchCommitments, importSummary, requestToken } from '../google/gcal'
 import { WEEKDAYS, fmtMinutes } from './format'
 import { KIND_LABEL, ScheduleGrid } from './ScheduleGrid'
 
-const W = (a: string, b: string): TimeWindow => ({ start: fromHHMM(a), end: fromHHMM(b) })
+
+const DAY_START = 6 * 60 + 30
+const DAY_END = 22 * 60
 
 export const defaultAthlete = (): Athlete => ({
   goal: 'finish',
@@ -26,6 +27,10 @@ export const defaultAthlete = (): Athlete => ({
   poolDays: [0, 1, 2, 3, 4, 5],
   maxSessionsPerDay: 2,
   longDay: 5,
+  availableHours: 10,
+  dayStart: DAY_START,
+  dayEnd: DAY_END,
+  preferredTime: 'evening',
 })
 
 export const defaultProfile = (): Profile => ({
@@ -35,15 +40,7 @@ export const defaultProfile = (): Profile => ({
   planStart: today(),
   athlete: defaultAthlete(),
   schedule: {
-    windows: [
-      [W('06:30', '08:00'), W('18:00', '21:00')],
-      [W('06:30', '08:00'), W('18:00', '21:00')],
-      [W('06:30', '08:00'), W('18:00', '21:00')],
-      [W('06:30', '08:00'), W('18:00', '21:00')],
-      [W('06:30', '08:00'), W('18:00', '20:00')],
-      [W('08:00', '14:00')],
-      [W('08:00', '12:00')],
-    ],
+    windows: windowsFromLimits(DAY_START, DAY_END),
     commitments: [],
   },
   tests: {},
@@ -90,8 +87,6 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
     return { ...defaultProfile(), ...(legacy ?? {}) }
   })
   const [step, setStep] = useState(initialStep ?? 0)
-  // Enquanto não mexeres nas janelas à mão, a app vai sugerindo os horários
-  const [touched, setTouched] = useState(!!profile)
   useEffect(() => {
     if (profile) return
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(p)) } catch { /* sem armazenamento */ }
@@ -104,15 +99,17 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
   const last = step === STEPS.length - 1
   const hours = p.athlete.availableHours ?? 10
 
-  function suggest(patch: Partial<Athlete> = {}) {
-    const athlete = { ...p.athlete, ...patch }
-    setP({ ...p, athlete, schedule: { ...p.schedule, windows: suggestWindows({ ...p, athlete }, athlete.availableHours ?? 10) } })
+  // Perfis antigos tinham janelas por dia: os limites começam no início e fim delas
+  const all = p.schedule.windows.flat()
+  const limits = {
+    start: p.athlete.dayStart ?? (all.length ? Math.min(...all.map((w) => w.start)) : 390),
+    end: p.athlete.dayEnd ?? (all.length ? Math.max(...all.map((w) => w.end)) : 1320),
   }
-
-  function goTo(i: number) {
-    if (i === 4 && !touched) suggest()
-    setStep(i)
+  function setLimits(start: number, end: number) {
+    if (end - start < 60) return
+    setP({ ...p, athlete: { ...p.athlete, dayStart: start, dayEnd: end }, schedule: { ...p.schedule, windows: windowsFromLimits(start, end) } })
   }
+  const goTo = setStep
 
   function save(regenerate: boolean) {
     try { localStorage.removeItem(DRAFT_KEY) } catch { /* nada */ }
@@ -213,31 +210,26 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
       {step === 4 && (
         <section className="card">
           <h2>Quando podes treinar</h2>
+          <p className="muted small">Não precisas de dizer dia a dia. A app procura os espaços livres entre os teus eventos, semana a semana, com 15 min de margem.</p>
           <div className="grid2">
             <label>Horas por semana para treinar
-              <input id="q-avail" type="number" min={3} max={30} step={0.5} value={hours}
-                onChange={(e) => { const v = Number(e.target.value) || 0; if (touched) setA({ availableHours: v }); else suggest({ availableHours: v }) }} /></label>
+              <input id="q-avail" type="number" min={3} max={30} step={0.5} value={hours} onChange={(e) => setA({ availableHours: Number(e.target.value) || 0 })} /></label>
             <label>Dia do treino longo de bicicleta
-              <select id="q-long" value={p.athlete.longDay} onChange={(e) => { const v = Number(e.target.value) as Weekday; if (touched) setA({ longDay: v }); else suggest({ longDay: v }) }}>
+              <select id="q-long" value={p.athlete.longDay} onChange={(e) => setA({ longDay: Number(e.target.value) as Weekday })}>
                 {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
               </select></label>
+            <label>Nunca treinar antes das
+              <input id="q-day-start" type="time" value={toHHMM(limits.start)} onChange={(e) => setLimits(fromHHMM(e.target.value), limits.end)} /></label>
+            <label>Nem depois das
+              <input id="q-day-end" type="time" value={toHHMM(limits.end)} onChange={(e) => setLimits(limits.start, fromHHMM(e.target.value))} /></label>
           </div>
-          <div className="suggest-box">
-            <p className="small">{touched
-              ? 'Mudaste os horários à mão. Se quiseres, a app volta a sugerir com base no teu calendário.'
-              : 'Estes horários são uma sugestão a partir do teu calendário: o bloco maior no dia do treino longo, um dia de descanso e o resto à volta das aulas. Ajusta o que quiseres.'}</p>
-            {touched && <button onClick={() => { suggest(); setTouched(false) }}>Sugerir horários de novo</button>}
-          </div>
-          <div className="windows">
-            {WEEKDAYS.map((d, i) => (
-              <WindowsEditor key={d} day={d} windows={p.schedule.windows[i] ?? []}
-                onChange={(w) => {
-                  setTouched(true)
-                  const windows = p.schedule.windows.map((x, j) => (j === i ? w : x))
-                  setP({ ...p, schedule: { ...p.schedule, windows } })
-                }} />
-            ))}
-          </div>
+          <fieldset className="choice">
+            <legend>Nos dias de aulas, preferes treinar</legend>
+            <div className="choice-row">
+              <Radio name="pref" checked={p.athlete.preferredTime === 'morning'} onChange={() => setA({ preferredTime: 'morning' })} label="De manhã" hint="O mais cedo possível" />
+              <Radio name="pref" checked={p.athlete.preferredTime !== 'morning'} onChange={() => setA({ preferredTime: 'evening' })} label="Ao fim do dia" hint="Por volta das 18h, quando der" />
+            </div>
+          </fieldset>
           <fieldset className="choice">
             <legend>Dias com acesso a piscina</legend>
             <div className="check-row">
@@ -250,13 +242,11 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
               ))}
             </div>
           </fieldset>
-          <div className="grid2">
-            <label>Treinos por dia, no máximo
-              <select id="q-max" value={p.athlete.maxSessionsPerDay} onChange={(e) => setA({ maxSessionsPerDay: Number(e.target.value) as 1 | 2 })}>
-                <option value={1}>1 treino</option><option value={2}>2 treinos</option>
-              </select></label>
-          </div>
-          <p className="muted small">A corrida longa fica no dia a seguir ao da bicicleta longa.</p>
+          <label>Treinos por dia, no máximo
+            <select id="q-max" value={p.athlete.maxSessionsPerDay} onChange={(e) => setA({ maxSessionsPerDay: Number(e.target.value) as 1 | 2 })}>
+              <option value={1}>1 treino</option><option value={2}>2 treinos</option>
+            </select></label>
+          <p className="muted small">Ao fim de semana e nos treinos longos, a app começa cedo. A corrida longa fica no dia a seguir ao da bicicleta longa.</p>
         </section>
       )}
 
@@ -264,10 +254,10 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
       {step === 5 && <TestsStep tests={p.tests} athlete={p.athlete} onChange={(tests) => setP({ ...p, tests })} />}
 
       {(step === 3 || step === 4) && <section className="card summary">
-        <h2>A tua semana</h2>
+        <h2>A tua primeira semana</h2>
         <ScheduleGrid schedule={p.schedule} week={mondayOf(p.planStart)} />
         <p className={freeTotal < 600 ? 'warn-text small' : 'muted small'}>
-          Tens {fmtMinutes(freeTotal)} livres por semana para natação, bicicleta e corrida. No pico o plano vai usar até {fmtMinutes(peakTarget(p))}.
+          Tens {fmtMinutes(freeTotal)} livres entre os teus eventos. O plano usa só uma parte: no pico, até {fmtMinutes(peakTarget(p))} por semana.
           {freeTotal < 600 && ' Com menos de 10 h livres o Ironman fica muito apertado. Tenta ter um dia de fim de semana com 5 a 6 h.'}
           {!free.some((m) => m >= 240) && ' Não há nenhum dia com 4 h seguidas para a bicicleta longa.'}
         </p>
@@ -294,26 +284,6 @@ function Radio({ name, checked, onChange, label, hint }: { name: string; checked
       <input type="radio" name={name} checked={checked} onChange={onChange} />
       <span><b>{label}</b>{hint && <small>{hint}</small>}</span>
     </label>
-  )
-}
-
-function WindowsEditor({ day, windows, onChange }: { day: string; windows: TimeWindow[]; onChange: (w: TimeWindow[]) => void }) {
-  return (
-    <div className="win-day">
-      <b>{day}</b>
-      <div className="win-list">
-        {windows.length === 0 && <span className="muted small">Sem treino</span>}
-        {windows.map((w, i) => (
-          <span key={i} className="win-item">
-            <input type="time" aria-label={`${day}: início`} value={toHHMM(w.start)} onChange={(e) => onChange(windows.map((x, j) => (j === i ? { ...x, start: fromHHMM(e.target.value) } : x)))} />
-            <span>–</span>
-            <input type="time" aria-label={`${day}: fim`} value={toHHMM(w.end)} onChange={(e) => onChange(windows.map((x, j) => (j === i ? { ...x, end: fromHHMM(e.target.value) } : x)))} />
-            <button className="link small danger" aria-label="Remover janela" onClick={() => onChange(windows.filter((_, j) => j !== i))}>✕</button>
-          </span>
-        ))}
-        <button className="link small" onClick={() => onChange([...windows, windows.length ? W('18:00', '20:00') : W('07:00', '08:00')])}>+ janela</button>
-      </div>
-    </div>
   )
 }
 

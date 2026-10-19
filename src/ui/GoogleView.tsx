@@ -56,7 +56,7 @@ export function GoogleView({ settings, imported, busy, error, onConnect, onSync,
         {settings.lastImport && settings.lastImport.length > 0 && (
           <ul className="g-stats small">
             {settings.lastImport.map((c) => (
-              <li key={c.name}><span>{c.name}</span><span className="muted">{c.failed ? 'não foi possível ler' : `${c.events} eventos${c.allDay ? ` · ${c.allDay} de dia inteiro, fora` : ''}`}</span></li>
+              <li key={c.name}><span>{c.name}</span><span className="muted">{c.failed ? 'não foi possível ler' : `${c.events} eventos${c.allDay ? ` + ${c.allDay} de dia inteiro` : ''}`}</span></li>
             ))}
           </ul>
         )}

@@ -30,7 +30,8 @@ export function peakTarget(profile: Profile): number {
   const capacity = typicalWeek(profile, mondayOf(profile.planStart)).reduce((x, y) => x + y, 0)
   const avgLevel = (LEVEL_SCORE[a.level.swim] + LEVEL_SCORE[a.level.bike] + LEVEL_SCORE[a.level.run]) / 3
   const goal = a.goal === 'time' ? 900 : avgLevel < 1.5 ? 720 : 780
-  return Math.round(Math.min(capacity * 0.9, goal))
+  const available = a.availableHours ? a.availableHours * 60 : Infinity
+  return Math.round(Math.min(capacity * 0.9, goal, available))
 }
 
 /** Divide as semanas entre as fases, contando para trás a partir da semana da prova */
@@ -292,7 +293,7 @@ export function allowedOn(profile: Profile, draft: Pick<Session, 'sport' | 'kind
   const wd = weekdayOf(date)
   if (draft.sport === 'swim' && a.poolDays.length > 0 && !a.poolDays.includes(wd as never)) return false
   const football = sameDay.some((s) => s.sport === 'football')
-  const footballYesterday = commitmentsOn(profile.schedule, addDaysIso(date, -1)).some((c) => c.kind === 'football')
+  const footballYesterday = commitmentsOn(profile.schedule, addDaysIso(date, -1)).some((c) => c.kind === 'football' && !c.allDay)
   if (football && (draft.key || draft.sport === 'run' || draft.sport === 'brick')) return false
   if (footballYesterday && hardRun(draft)) return false
   const planned = sameDay.filter((s) => s.kind !== 'fixed' && !s.skipped)
@@ -320,6 +321,17 @@ export function fixedSessions(profile: Profile, date: string): Session[] {
       const steps: Step[] = [{ label: c.kind === 'football' ? 'Treino ou jogo de futebol' : 'Ginásio', minutes, zone: c.kind === 'football' ? 3 : 2 }]
       return { id: `${date}-fixed-${c.id}`, date, sport, kind: 'fixed' as const, title: c.title, minutes, key: false, steps, plannedTss: estimateTss(steps, sport), start: c.start, commitmentId: c.id }
     })
+}
+
+/**
+ * Hora de início dentro de uma janela livre. Treinos longos e fins de semana
+ * começam cedo; nos outros dias segue a preferência (manhã ou fim do dia).
+ */
+export function startIn(slot: TimeWindow, minutes: number, profile: Profile, date: string, long = false): number {
+  const latest = slot.end - Math.min(minutes, slot.end - slot.start)
+  if (long || weekdayOf(date) >= 5 || profile.athlete.preferredTime === 'morning') return slot.start
+  const target = 18 * 60
+  return Math.round(Math.max(slot.start, Math.min(target, latest)) / 5) * 5
 }
 
 /** A maior janela livre; em caso de empate, a mais cedo */
@@ -369,7 +381,7 @@ function placeWeek(week: Week, drafts: Draft[], profile: Profile, overrides: Rec
       key: draft.key,
       steps,
       plannedTss: estimateTss(steps, draft.sport),
-      start: best.slot.start,
+      start: startIn(best.slot, minutes, profile, best.day, draft.long),
     }
     placed.get(best.day)!.push(session)
     slots.set(best.day, subtract(slots.get(best.day)!, [{ start: session.start!, end: session.start! + minutes }]))
@@ -397,9 +409,20 @@ function raceSession(date: string, name: string): Session {
 export function generatePlan(profile: Profile, overrides: Record<string, number> = {}): Plan {
   const weeks = buildWeeks(profile)
   const training = weeklyTraining(profile.schedule)
-  const footballMinutes = profile.schedule.commitments
-    .filter((c) => c.kind === 'football' && c.weekday !== undefined)
-    .reduce((a, c) => a + c.end - c.start, 0)
+  // Ginásio e futebol de cada semana (com eventos um a um, nenhuma semana é igual).
+  // Depois do último evento conhecido usa-se a média das semanas conhecidas.
+  const perWeek = weeks.map((w) => {
+    const days = Array.from({ length: 7 }, (_, i) => addDaysIso(w.start, i))
+    const list = days.flatMap((d) => commitmentsOn(profile.schedule, d).filter(isTrainingCommitment))
+    return { gym: list.filter((c) => c.kind === 'gym').length, football: list.filter((c) => c.kind === 'football').reduce((a, c) => a + c.end - c.start, 0) }
+  })
+  const lastDated = profile.schedule.commitments.reduce((m, c) => (c.date && c.date > m ? c.date : m), '')
+  const known = perWeek.filter((_, i) => weeks[i].start <= lastDated)
+  const avg = known.length ? {
+    gym: Math.round(known.reduce((a, x) => a + x.gym, 0) / known.length),
+    football: Math.round(known.reduce((a, x) => a + x.football, 0) / known.length),
+  } : null
+  const recurringFootball = profile.schedule.commitments.filter((c) => c.kind === 'football' && c.weekday !== undefined).reduce((a, c) => a + c.end - c.start, 0)
   let recoveryCount = 0
   let progression = 0
   const sessions = weeks.flatMap((week) => {
@@ -407,7 +430,10 @@ export function generatePlan(profile: Profile, overrides: Record<string, number>
     else if (week.phase === 'base' || week.phase === 'build' || week.phase === 'peak') progression++
     // Testes na primeira semana e em semanas alternadas de descarga
     const testWeek = week.index === 0 || (week.recovery && recoveryCount % 2 === 0)
-    const ctx = { athlete: profile.athlete, testWeek, progression: Math.max(0, progression - 1), gymPerWeek: training.gym, footballMinutes }
+    const beyond = avg && week.start > lastDated
+    const gymPerWeek = beyond ? Math.max(training.gym, avg.gym) : perWeek[week.index].gym
+    const footballMinutes = beyond ? Math.max(recurringFootball, avg.football) : perWeek[week.index].football
+    const ctx = { athlete: profile.athlete, testWeek, progression: Math.max(0, progression - 1), gymPerWeek, footballMinutes }
     return placeWeek(week, weekDrafts(week, ctx), profile, overrides)
   })
   sessions.push(raceSession(profile.raceDate, profile.raceName))
