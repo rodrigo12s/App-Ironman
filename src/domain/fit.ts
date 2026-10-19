@@ -9,6 +9,7 @@ const SPORTS: Record<string, Activity['sport']> = {
   e_biking: 'bike',
   swimming: 'swim',
   training: 'strength',
+  soccer: 'football',
   fitness_equipment: 'strength',
 }
 

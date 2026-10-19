@@ -13,6 +13,7 @@ export interface SessionMatch {
 const sportMatches = (s: Session, a: Activity) => {
   if (s.sport === 'brick') return a.sport === 'bike' || a.sport === 'run'
   if (s.sport === 'strength') return a.sport === 'strength' || a.sport === 'other'
+  if (s.sport === 'football') return a.sport === 'football' || a.sport === 'other'
   return s.sport === a.sport
 }
 

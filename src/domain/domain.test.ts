@@ -6,14 +6,47 @@ import { loadAlerts, loadSeries } from './load'
 import { matchSessions } from './compliance'
 import { parseFit } from './fit'
 import { cssPer100, ftp, paceZones, powerZones } from './zones'
-import type { Activity, Profile } from './types'
+import type { Activity, Profile, Session } from './types'
+import { freeSlots } from './schedule'
+import { addDaysIso, weekdayOf } from './dates'
+import { parseIcs } from './ics'
 
 const profile: Profile = {
   name: 'Rodrigo',
   raceName: 'Ironman Cascais',
   raceDate: '2027-10-16',
   planStart: '2026-10-19',
-  availability: [60, 90, 75, 90, 45, 330, 180],
+  athlete: {
+    goal: 'finish',
+    level: { swim: 'beginner', bike: 'intermediate', run: 'intermediate' },
+    currentWeeklyHours: 6,
+    longestRideMin: 120,
+    longestRunMin: 70,
+    longestSwimMin: 40,
+    injuries: [],
+    hasPowerMeter: true,
+    hasHrMonitor: true,
+    hasSmartTrainer: false,
+    poolDays: [0, 1, 2, 3, 4, 5],
+    maxSessionsPerDay: 2,
+    longDay: 5,
+  },
+  schedule: {
+    windows: [
+      [{ start: 390, end: 480 }, { start: 1080, end: 1260 }],
+      [{ start: 390, end: 480 }, { start: 1080, end: 1260 }],
+      [{ start: 390, end: 480 }, { start: 1080, end: 1260 }],
+      [{ start: 390, end: 480 }, { start: 1080, end: 1260 }],
+      [{ start: 390, end: 480 }, { start: 1080, end: 1260 }],
+      [{ start: 480, end: 840 }],
+      [{ start: 480, end: 720 }],
+    ],
+    commitments: [
+      { id: 'fut', title: 'Treino de futebol', kind: 'football', weekday: 2, start: 1140, end: 1260, source: 'manual' },
+      { id: 'gym', title: 'Ginásio', kind: 'gym', weekday: 0, start: 1080, end: 1140, source: 'manual' },
+      { id: 'aula', title: 'Aula de Cálculo', kind: 'class', weekday: 3, start: 1080, end: 1200, source: 'manual' },
+    ],
+  },
   tests: { swim400Sec: 400, swim200Sec: 190, bike20minWatts: 240, run30minPaceSecPerKm: 285, bikeLthr: 160, runLthr: 168 },
 }
 
@@ -37,13 +70,37 @@ describe('plano', () => {
     const idx = plan.weeks.map((w) => order.indexOf(w.phase))
     expect([...idx].sort((a, b) => a - b)).toEqual(idx)
   })
-  it('respeita o tempo disponível de cada dia', () => {
-    const byDay = new Map<string, number>()
-    for (const s of plan.sessions) if (s.kind !== 'race') byDay.set(s.date, (byDay.get(s.date) ?? 0) + s.minutes)
-    for (const [d, m] of byDay) {
-      const wd = (new Date(d + 'T12:00:00').getDay() + 6) % 7
-      expect(m, d).toBeLessThanOrEqual(Math.max(30, profile.availability[wd]))
+  it('marca as sessões dentro das janelas livres, sem chocar com aulas, ginásio ou futebol', () => {
+    for (const s of plan.sessions.filter((x) => x.kind !== 'race' && x.kind !== 'fixed')) {
+      const free = freeSlots(profile, s.date)
+      expect(free.some((w) => s.start! >= w.start && s.start! + s.minutes <= w.end), `${s.date} ${s.title}`).toBe(true)
     }
+    const sameDay = new Map<string, Session[]>()
+    for (const s of plan.sessions.filter((x) => x.kind !== 'fixed')) sameDay.set(s.date, [...(sameDay.get(s.date) ?? []), s])
+    for (const list of sameDay.values()) {
+      const sorted = [...list].sort((a, b) => a.start! - b.start!)
+      for (let i = 1; i < sorted.length; i++) expect(sorted[i].start!).toBeGreaterThanOrEqual(sorted[i - 1].start! + sorted[i - 1].minutes)
+    }
+  })
+  it('inclui o futebol e o ginásio e evita corrida no dia do futebol e corrida dura no dia seguinte', () => {
+    const football = plan.sessions.filter((s) => s.sport === 'football')
+    expect(football.length).toBeGreaterThan(40)
+    for (const f of football) {
+      expect(plan.sessions.some((s) => s.date === f.date && (s.sport === 'run' || s.sport === 'brick'))).toBe(false)
+      const next = addDaysIso(f.date, 1)
+      expect(plan.sessions.some((s) => s.date === next && s.sport === 'run' && ['long', 'tempo', 'test'].includes(s.kind))).toBe(false)
+    }
+    expect(plan.sessions.some((s) => s.kind === 'fixed' && s.sport === 'strength')).toBe(true)
+  })
+  it('só põe natação nos dias com piscina', () => {
+    expect(plan.sessions.filter((s) => s.sport === 'swim').every((s) => weekdayOf(s.date) !== 6)).toBe(true)
+  })
+  it('põe a bicicleta longa no dia preferido e começa perto do volume atual', () => {
+    const longs = plan.sessions.filter((s) => s.kind === 'long' && s.sport === 'bike')
+    expect(longs.filter((s) => weekdayOf(s.date) === 5).length / longs.length).toBeGreaterThan(0.8)
+    expect(plan.weeks[1].targetMinutes).toBeLessThanOrEqual(6 * 60 * 1.2)
+    const firstLong = longs[0]
+    expect(firstLong.minutes).toBeLessThanOrEqual(135)
   })
   it('tem semanas de descarga e taper com menos volume', () => {
     expect(plan.weeks.some((w) => w.recovery)).toBe(true)
@@ -70,14 +127,14 @@ describe('reorganização', () => {
     if (moved) expect(moved.date > key.date).toBe(true)
   })
   it('não compensa sessões secundárias', () => {
-    const minor = plan.sessions.find((s) => !s.key)!
+    const minor = plan.sessions.find((s) => !s.key && s.kind !== 'fixed')!
     const { plan: next } = skipSession(plan, profile, minor.id, minor.date)
     expect(next.sessions.filter((s) => s.movedFrom)).toHaveLength(0)
   })
   it('ajusta um dia com menos tempo', () => {
-    const day = plan.sessions.find((s) => s.minutes >= 60 && s.kind !== 'race')!
+    const day = plan.sessions.find((s) => s.minutes >= 60 && s.kind !== 'race' && s.kind !== 'fixed')!
     const { plan: next } = setDayAvailability(plan, profile, day.date, 30, day.date)
-    const left = next.sessions.filter((s) => s.date === day.date && !s.skipped).reduce((a, s) => a + s.minutes, 0)
+    const left = next.sessions.filter((s) => s.date === day.date && !s.skipped && s.kind !== 'fixed').reduce((a, s) => a + s.minutes, 0)
     expect(left).toBeLessThanOrEqual(30)
   })
 })
@@ -130,5 +187,37 @@ describe('ficheiros .FIT', () => {
     expect(a.date).toBe('2026-10-20')
     expect(a.tssMethod).toBe('pace')
     expect(a.tss).toBeGreaterThan(40)
+  })
+})
+
+describe('calendário da universidade (.ics)', () => {
+  const ics = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'SUMMARY:Análise Matemática I - T', 'DTSTART:20260921T090000', 'DTEND:20260921T110000',
+    'RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261218T235959Z', 'EXDATE:20261208T090000', 'END:VEVENT',
+    'BEGIN:VEVENT', 'SUMMARY:Exame de Física', 'DTSTART:20270115T140000', 'DTEND:20270115T170000', 'END:VEVENT',
+    'BEGIN:VEVENT', 'SUMMARY:Feriado', 'DTSTART;VALUE=DATE:20261201', 'END:VEVENT',
+    ...['20261020', '20261027', '20261103', '20261110'].flatMap((d) => ['BEGIN:VEVENT', 'SUMMARY:Programação PL', `DTSTART:${d}T140000`, `DTEND:${d}T160000`, 'END:VEVENT']),
+    'END:VCALENDAR',
+  ].join('\r\n')
+  const list = parseIcs(ics, '2026-10-19', '2027-10-16')
+  it('lê aulas semanais, exames e ignora dias inteiros', () => {
+    const am = list.filter((c) => c.title.startsWith('Análise'))
+    expect(am.map((c) => c.weekday).sort()).toEqual([0, 2])
+    expect(am[0]).toMatchObject({ start: 540, end: 660, until: '2026-12-18', kind: 'class' })
+    expect(list.find((c) => c.title === 'Exame de Física')).toMatchObject({ date: '2027-01-15', start: 840 })
+    expect(list.some((c) => c.title === 'Feriado')).toBe(false)
+  })
+  it('junta aulas soltas repetidas num compromisso semanal', () => {
+    const pl = list.filter((c) => c.title === 'Programação PL')
+    expect(pl).toHaveLength(1)
+    expect(pl[0].weekday).toBe(1)
+  })
+  it('tira as aulas às janelas de treino', () => {
+    const p2 = { ...profile, schedule: { ...profile.schedule, commitments: [...profile.schedule.commitments, ...list] } }
+    // Segunda 26/10: janela da manhã 06:30-08:00 não choca com 09:00-11:00
+    expect(freeSlots(p2, '2026-10-26').map((w) => w.start)).toContain(390)
+    // Exame 15/01 às 14:00: a janela 18:00-21:00 mantém-se
+    expect(freeSlots(p2, '2027-01-15').some((w) => w.start === 1080)).toBe(true)
   })
 })

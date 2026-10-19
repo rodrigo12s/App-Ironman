@@ -2,7 +2,9 @@
 
 Aplicação web para preparar o primeiro Ironman. Tudo corre no browser e os dados ficam guardados no próprio dispositivo.
 
-## O que faz (MVP)
+## O que faz
+- **Questionário inicial**: prova e objetivo, experiência em cada modalidade, volume atual e sessões mais longas recentes, lesões, material, janelas de treino por dia, dias com piscina e dia preferido para o treino longo (`src/ui/ProfileView.tsx`).
+- **Horário real**: importação do calendário da universidade em .ics (aulas semanais, exames e eventos) e compromissos manuais. O ginásio substitui a força do plano e o futebol conta como treino, sem corrida nesse dia nem corrida dura no dia seguinte (`src/domain/ics.ts`, `src/domain/schedule.ts`).
 - **Plano periodizado** a partir da data da prova: base, construção, pico, taper e semana da prova, com semanas de descarga a cada 4 e subidas de volume limitadas a ~10% por semana (`src/domain/plan.ts`).
 - **Reorganização automática**: quando uma sessão falha ou um dia tem menos tempo, as sessões-chave passam para outro dia da mesma semana e as secundárias saem (`src/domain/adapt.ts`).
 - **Testes e zonas**: CSS na natação, FTP na bicicleta, limiar na corrida e FC de limiar (`src/domain/zones.ts`). Cada passo das sessões mostra o alvo em W, ritmo ou bpm.

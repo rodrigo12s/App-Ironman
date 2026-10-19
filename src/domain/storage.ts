@@ -7,10 +7,23 @@ export const emptyState = (): AppState => ({ profile: null, plan: null, activiti
 export function loadState(): AppState {
   try {
     const raw = localStorage.getItem(KEY)
-    return raw ? { ...emptyState(), ...JSON.parse(raw) } : emptyState()
+    return raw ? migrate({ ...emptyState(), ...JSON.parse(raw) }) : emptyState()
   } catch {
     return emptyState()
   }
+}
+
+/**
+ * A primeira versão guardava só minutos por dia. Sem o questionário não há
+ * horário, por isso mantém-se a prova, os testes e os treinos e pede-se o
+ * questionário de novo.
+ */
+function migrate(state: AppState): AppState {
+  const p = state.profile as (AppState['profile'] & { availability?: unknown }) | null
+  if (p && (!p.athlete || !p.schedule)) {
+    return { ...state, profile: null, plan: null, legacy: { raceName: p.raceName, raceDate: p.raceDate, tests: p.tests } }
+  }
+  return state
 }
 
 export function saveState(state: AppState): boolean {
@@ -29,5 +42,5 @@ export function exportState(state: AppState): Blob {
 export function importState(text: string): AppState {
   const parsed = JSON.parse(text)
   if (typeof parsed !== 'object' || !('activities' in parsed)) throw new Error('Ficheiro de cópia de segurança inválido.')
-  return { ...emptyState(), ...parsed }
+  return migrate({ ...emptyState(), ...parsed })
 }

@@ -6,6 +6,7 @@ export const SPORT_LABEL: Record<Sport | 'other', string> = {
   run: 'Corrida',
   strength: 'Força',
   brick: 'Brick',
+  football: 'Futebol',
   other: 'Outro',
 }
 
@@ -15,6 +16,7 @@ export const SPORT_ICON: Record<Sport | 'other', string> = {
   run: '🏃',
   strength: '🏋️',
   brick: '🔁',
+  football: '⚽',
   other: '•',
 }
 

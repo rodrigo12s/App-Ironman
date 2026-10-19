@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { addDaysIso, daysBetween, mondayOf } from '../domain/dates'
 import { complianceRate, matchSessions, type SessionMatch } from '../domain/compliance'
 import { dayCapacity } from '../domain/plan'
+import { commitmentsOn, toHHMM } from '../domain/schedule'
 import type { Activity, Plan, Profile, Session, Step } from '../domain/types'
 import { cssPer100, formatPace, ftp, hrZones, paceZones, powerZones, runThresholdPace } from '../domain/zones'
 import { PHASE_LABEL, SPORT_ICON, SPORT_LABEL, fmtDay, fmtMinutes } from './format'
@@ -76,6 +77,7 @@ export function WeekView({ profile, plan, activities, today, onSkip, onDayMinute
 
       {days.map((d) => {
         const ms = matches.filter((m) => m.session.date === d)
+        const classes = commitmentsOn(profile.schedule, d).filter((c) => c.kind !== 'gym' && c.kind !== 'football')
         const extra = unplanned.filter((a) => a.date === d)
         const cap = dayCapacity(profile, plan, d)
         const overridden = plan.dayOverrides[d] !== undefined
@@ -97,6 +99,9 @@ export function WeekView({ profile, plan, activities, today, onSkip, onDayMinute
                 <button className="primary small" type="submit">Reorganizar</button>
                 <button type="button" className="small" onClick={() => setEditingDay(null)}>Cancelar</button>
               </form>
+            )}
+            {classes.length > 0 && (
+              <p className="muted small day-commitments">{classes.map((c) => `${c.title} ${toHHMM(c.start)}–${toHHMM(c.end)}`).join(' · ')}</p>
             )}
             {ms.length === 0 && extra.length === 0 && <p className="muted small">Sem treino. Descansa bem.</p>}
             {ms.map((m) => (
@@ -121,15 +126,15 @@ function SessionCard({ m, profile, today, onSkip, onUnskip }: { m: SessionMatch;
   const [open, setOpen] = useState(false)
   const s = m.session
   const st = STATUS[m.status]
-  const canSkip = !s.skipped && m.activities.length === 0 && s.kind !== 'race' && s.date >= addDaysIso(today, -6)
+  const canSkip = !s.skipped && m.activities.length === 0 && s.kind !== 'race' && s.kind !== 'fixed' && s.date >= addDaysIso(today, -6)
   return (
-    <div className={`session ${s.skipped ? 'is-skipped' : ''} ${s.kind === 'race' ? 'is-race' : ''}`}>
+    <div className={`session ${s.skipped ? 'is-skipped' : ''} ${s.kind === 'race' ? 'is-race' : ''} ${s.kind === 'fixed' ? 'is-fixed' : ''}`}>
       <button className="s-main" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="icon">{SPORT_ICON[s.sport]}</span>
         <div className="s-text">
           <b>{s.title}</b>{s.key && <span className="key" title="Sessão-chave">chave</span>}
           <div className="muted small">
-            {SPORT_LABEL[s.sport]} · {fmtMinutes(s.minutes)} · {s.plannedTss} TSS
+            {s.start !== undefined && `${toHHMM(s.start)} · `}{s.kind === 'fixed' ? 'Do teu horário' : SPORT_LABEL[s.sport]} · {fmtMinutes(s.minutes)} · {s.plannedTss} TSS
             {s.movedFrom && ` · movida de ${fmtDay(s.movedFrom)}`}
           </div>
         </div>

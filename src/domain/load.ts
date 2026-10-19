@@ -25,7 +25,7 @@ export function computeTss(a: Omit<Activity, 'tss' | 'tssMethod'>, profile: Prof
     const IF = a.avgHr / lthr
     return { tss: Math.round(hours * IF * IF * 100), tssMethod: 'hr' }
   }
-  const perHour = a.sport === 'strength' ? 40 : a.sport === 'swim' ? 55 : 60
+  const perHour = a.sport === 'strength' ? 40 : a.sport === 'football' ? 70 : a.sport === 'swim' ? 55 : 60
   return { tss: Math.round(hours * perHour), tssMethod: 'estimate' }
 }
 

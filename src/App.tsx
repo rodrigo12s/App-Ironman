@@ -39,6 +39,7 @@ export default function App() {
       }
       update((s) => ({
         ...s,
+        legacy: undefined,
         profile: p,
         plan: nextPlan,
         activities: s.activities.map((a) => ({ ...a, ...computeTss(a, p) })),
@@ -86,7 +87,10 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'profile' && <ProfileView profile={profile} hasPlan={!!plan} onSave={saveProfile} />}
+        {tab === 'profile' && !profile && state.legacy && (
+          <div className="alert alert-info notice"><div><p><b>A app agora começa por um questionário.</b> Guardámos a tua prova, os testes e os treinos. Responde às perguntas para o plano se adaptar ao teu horário.</p></div></div>
+        )}
+        {tab === 'profile' && <ProfileView profile={profile} legacy={state.legacy} hasPlan={!!plan} onSave={saveProfile} />}
         {tab === 'week' && plan && profile && (
           <WeekView profile={profile} plan={plan} activities={state.activities} today={today}
             onSkip={(id) => applyPlan((pl, pr) => skipSession(pl, pr, id, today))}
