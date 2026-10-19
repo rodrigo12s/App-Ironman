@@ -46,7 +46,10 @@ export const defaultProfile = (): Profile => ({
   tests: {},
 })
 
-const STEPS = ['A prova', 'Experiência', 'Saúde e material', 'O teu calendário', 'Quando treinas', 'Testes'] as const
+const ALL_STEPS = ['A prova', 'Experiência', 'Saúde e material', 'O teu calendário', 'Quando treinas', 'Testes'] as const
+type StepName = (typeof ALL_STEPS)[number]
+/** No primeiro questionário, "Quando treinas" fica de fora: a app usa valores por defeito e mudas depois no Perfil */
+const ONBOARDING_STEPS: StepName[] = ['A prova', 'Experiência', 'Saúde e material', 'O teu calendário', 'Testes']
 
 const LEVELS: { id: Level; label: string; hint: Record<'swim' | 'bike' | 'run', string> }[] = [
   { id: 'none', label: 'Nunca fiz', hint: { swim: 'Não nado crawl seguido', bike: 'Só ando de bicicleta a passear', run: 'Não corro' } },
@@ -96,6 +99,8 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
   const weeksToRace = Math.floor((new Date(p.raceDate).getTime() - new Date(p.planStart).getTime()) / (7 * 864e5))
   const free = typicalWeek(p, mondayOf(p.planStart))
   const freeTotal = free.reduce((a, b) => a + b, 0)
+  const STEPS: readonly StepName[] = profile ? ALL_STEPS : ONBOARDING_STEPS
+  const current = STEPS[step]
   const last = step === STEPS.length - 1
   const hours = p.athlete.availableHours ?? 10
 
@@ -126,7 +131,7 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
         ))}
       </nav>
 
-      {step === 0 && (
+      {current === 'A prova' && (
         <section className="card">
           <h2>A tua prova</h2>
           <div className="grid2">
@@ -151,7 +156,7 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
         </section>
       )}
 
-      {step === 1 && (
+      {current === 'Experiência' && (
         <section className="card">
           <h2>A tua experiência</h2>
           {(['swim', 'bike', 'run'] as const).map((sport) => (
@@ -179,7 +184,7 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
         </section>
       )}
 
-      {step === 2 && (
+      {current === 'Saúde e material' && (
         <section className="card">
           <h2>Saúde e material</h2>
           <fieldset className="choice">
@@ -193,7 +198,23 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
                 </label>
               ))}
             </div>
-            <p className="muted small">Com lesões nas pernas, a corrida longa fica limitada a 2 h e parte do volume de corrida passa para a bicicleta.</p>
+            {p.athlete.injuries.map((id) => {
+              const d = p.athlete.injuryDetails?.[id] ?? {}
+              const setD = (patch: Partial<typeof d>) => setA({ injuryDetails: { ...p.athlete.injuryDetails, [id]: { ...d, ...patch } } })
+              const label = INJURIES.find((i) => i.id === id)?.label
+              return (
+                <div key={id} className="injury-box">
+                  <b>{label}</b>
+                  <div className="grid2">
+                    <label>Quando foi?<input id={`inj-when-${id}`} type="month" value={d.when ?? ''} max={today().slice(0, 7)} onChange={(e) => setD({ when: e.target.value || undefined })} /></label>
+                    <label>{id === 'other' ? 'Qual foi a lesão?' : 'O que aconteceu (opcional)'}
+                      <textarea id={`inj-notes-${id}`} rows={2} value={d.notes ?? ''} placeholder={id === 'other' ? 'Ex.: entorse no tornozelo direito, 3 semanas parado' : 'Ex.: dor ao correr mais de 10 km'}
+                        onChange={(e) => setD({ notes: e.target.value || undefined })} /></label>
+                  </div>
+                </div>
+              )
+            })}
+            <p className="muted small">Com lesões nas pernas, a corrida longa fica limitada a 2 h e parte do volume de corrida passa para a bicicleta. O que escreves aqui fica guardado para ajustar o plano.</p>
           </fieldset>
           <fieldset className="choice">
             <legend>O que tens</legend>
@@ -206,8 +227,8 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
         </section>
       )}
 
-      {step === 3 && <CommitmentsStep profile={p} google={google} onGoogle={onGoogle} onChange={(commitments) => setP({ ...p, schedule: { ...p.schedule, commitments } })} />}
-      {step === 4 && (
+      {current === 'O teu calendário' && <CommitmentsStep profile={p} google={google} onGoogle={onGoogle} onChange={(commitments) => setP({ ...p, schedule: { ...p.schedule, commitments } })} />}
+      {current === 'Quando treinas' && (
         <section className="card">
           <h2>Quando podes treinar</h2>
           <p className="muted small">Não precisas de dizer dia a dia. A app procura os espaços livres entre os teus eventos, semana a semana, com 15 min de margem.</p>
@@ -251,9 +272,9 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
       )}
 
 
-      {step === 5 && <TestsStep tests={p.tests} athlete={p.athlete} onChange={(tests) => setP({ ...p, tests })} />}
+      {current === 'Testes' && <TestsStep tests={p.tests} athlete={p.athlete} onChange={(tests) => setP({ ...p, tests })} />}
 
-      {(step === 3 || step === 4) && <section className="card summary">
+      {(current === 'O teu calendário' || current === 'Quando treinas') && <section className="card summary">
         <h2>A tua primeira semana</h2>
         <ScheduleGrid schedule={p.schedule} week={mondayOf(p.planStart)} />
         <p className={freeTotal < 600 ? 'warn-text small' : 'muted small'}>
@@ -431,7 +452,18 @@ function TestsStep({ tests, athlete, onChange }: { tests: TestResults; athlete: 
   return (
     <section className="card">
       <h2>Testes e zonas</h2>
-      <p className="muted small">Se ainda não fizeste os testes, deixa em branco: a primeira semana do plano tem os testes e depois voltas aqui para pôr os resultados.</p>
+      <fieldset className="choice">
+        <legend>Sabes os teus valores de natação, bicicleta e corrida?</legend>
+        <div className="choice-row">
+          <Radio name="tests" checked={!!tests.unknown} onChange={() => set({ unknown: true })} label="Não sei" hint="A app marca treinos de teste na 1.ª semana e outra vez passado 1 mês" />
+          <Radio name="tests" checked={!tests.unknown} onChange={() => set({ unknown: false })} label="Sei alguns" hint="Escrevo os tempos que já tenho" />
+        </div>
+      </fieldset>
+      {tests.unknown ? (
+        <p className="small">Até lá, os treinos são guiados pela sensação de esforço (fácil, moderado, duro). Depois de cada teste, tocas no treino e escreves o resultado: as zonas ficam certas a partir daí.</p>
+      ) : (
+      <>
+      <p className="muted small">Deixa em branco o que não souberes: o plano marca esses testes na 1.ª semana e outra vez passado 1 mês.</p>
       <div className="grid3">
         <fieldset>
           <legend>🏊 Natação (CSS)</legend>
@@ -464,6 +496,8 @@ function TestsStep({ tests, athlete, onChange }: { tests: TestResults; athlete: 
         {tests.runLthr && <ZoneTable title="FC corrida (bpm)" zones={hrZones(tests.runLthr, 'run')} />}
         {css && <ZoneTable title="Ritmo natação (/100 m)" zones={paceZones(css, 'swim')} pace />}
       </div>
+      </>
+      )}
     </section>
   )
 }

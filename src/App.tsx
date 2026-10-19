@@ -5,20 +5,24 @@ import { computeTss } from './domain/load'
 import { generatePlan } from './domain/plan'
 import type { Activity, AppState, Commitment, CommitmentEdit, Plan, Profile, Session } from './domain/types'
 import { currentToken, ensureTrainingCalendar, fetchCommitments, importSummary, requestToken, revoke, syncTrainings } from './google/gcal'
+import { getKey, setKey } from './ai/key'
 import { useAppState } from './store'
 import { ActivitiesView } from './ui/ActivitiesView'
 import { CalendarView } from './ui/CalendarView'
+import { CoachView } from './ui/CoachView'
 import { GoogleView } from './ui/GoogleView'
+import { TriathlonView } from './ui/TriathlonView'
 import { ProfileView } from './ui/ProfileView'
 import { ProgressView } from './ui/ProgressView'
 import { TodayView } from './ui/TodayView'
 import { WeekView } from './ui/WeekView'
 
-type Tab = 'today' | 'calendar' | 'progress' | 'more'
-type Page = null | 'week' | 'activities' | 'profile' | 'tests' | 'backup' | 'google'
+type Tab = 'today' | 'triathlon' | 'calendar' | 'progress' | 'more'
+type Page = null | 'week' | 'activities' | 'profile' | 'tests' | 'backup' | 'google' | 'coach'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'today', label: 'Hoje', icon: '◉' },
+  { id: 'triathlon', label: 'Triatlo', icon: '⚑' },
   { id: 'calendar', label: 'Calendário', icon: '▦' },
   { id: 'progress', label: 'Progresso', icon: '↗' },
   { id: 'more', label: 'Mais', icon: '≡' },
@@ -31,6 +35,7 @@ const PAGE_TITLE: Record<Exclude<Page, null>, string> = {
   tests: 'Testes e zonas',
   backup: 'Cópia de segurança',
   google: 'Google Calendar',
+  coach: 'Treinador IA',
 }
 
 export default function App() {
@@ -40,7 +45,10 @@ export default function App() {
   const [toast, setToast] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [gBusy, setGBusy] = useState(false)
-  const [pending, setPending] = useState<{ plan: Plan; changes: string[] } | null>(null)
+  const [pending, setPending] = useState<{ plan: Plan; changes: string[]; summary?: string } | null>(null)
+  const [aiKey, setAiKey] = useState(() => getKey())
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
   const [gError, setGError] = useState<string | null>(null)
   const today = todayIso()
   const { profile, plan } = state
@@ -98,6 +106,26 @@ export default function App() {
 
   const unskip = (id: string) => applyPlan((pl) => ({ plan: { ...pl, sessions: pl.sessions.map((s) => (s.id === id ? { ...s, skipped: false } : s)) }, changes: ['Sessão reposta no plano.'] }))
   const skip = (id: string) => applyPlan((pl, pr) => skipSession(pl, pr, id, today))
+
+  /** O treinador IA propõe a distribuição da semana; só muda depois de aceitares */
+  async function askAi(monday: string) {
+    if (!profile || !plan || !aiKey) return
+    setAiBusy(true)
+    setAiError(null)
+    try {
+      // O SDK da Anthropic só é carregado quando se usa o treinador
+      const { applyProposal, askCoach, weekContext } = await import('./ai/coach')
+      const { context, movable, days } = weekContext(profile, plan, state.activities, monday, today)
+      if (movable.length === 0) { setAiError('Não há treinos por fazer nesta semana.'); return }
+      const proposal = await askCoach(aiKey, context)
+      const r = applyProposal(plan, profile, movable, days, proposal)
+      setPending({ plan: r.plan, changes: r.changes.length ? r.changes : ['A semana já estava bem distribuída: fica tudo igual.'], summary: r.summary })
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'Não foi possível falar com o treinador.')
+    } finally {
+      setAiBusy(false)
+    }
+  }
 
   /**
    * Os teus eventos mudaram: se algum treino ficou por cima de um evento,
@@ -262,6 +290,11 @@ export default function App() {
           <TodayView profile={profile} plan={plan} activities={state.activities} today={today}
             onSkip={skip} onUnskip={unskip} onDone={markDone} onOpenWeek={() => setPage('week')} onOpenProgress={() => setTab('progress')} />
         )}
+        {!page && tab === 'triathlon' && (
+          <TriathlonView profile={profile} plan={plan} activities={state.activities} today={today} hasKey={!!aiKey} busy={aiBusy} error={aiError}
+            onAsk={askAi} onSetupAi={() => setPage('coach')} onSkip={skip} onUnskip={unskip} onDone={markDone} />
+        )}
+        {page === 'coach' && <CoachView hasKey={!!aiKey} onSave={(k) => { setKey(k); setAiKey(k); setToast([k ? 'Treinador IA ligado.' : 'Chave removida.']) }} />}
         {!page && tab === 'calendar' && (
           <CalendarView profile={profile} plan={plan} activities={state.activities} today={today} onSkip={skip} onUnskip={unskip} onDone={markDone}
             onEditCommitment={editCommitment} onAddCommitment={(c) => changeCommitments((list) => [...list, c])} />
@@ -271,6 +304,7 @@ export default function App() {
           <div className="stack">
             <h1 className="screen-title">Mais</h1>
             <ul className="menu">
+              <MenuItem icon="✨" title="Treinador IA" hint={aiKey ? 'Ligado' : 'Distribuir os treinos com inteligência artificial'} onClick={() => setPage('coach')} />
               <MenuItem icon="📅" title="Google Calendar" hint={state.google ? 'Ligado · sincronizar eventos e treinos' : 'Juntar aulas, eventos e treinos num só calendário'} onClick={() => setPage('google')} />
               <MenuItem icon="⤓" title="Importar treinos" hint="Ficheiros .FIT do relógio ou registo à mão" onClick={() => setPage('activities')} />
               <MenuItem icon="🗓" title="Perfil e horário" hint="Questionário, aulas, ginásio e futebol" onClick={() => setPage('profile')} />
@@ -284,7 +318,7 @@ export default function App() {
 
       <Toast items={toast} onClose={() => setToast([])} />
       {pending && (
-        <ProposalSheet changes={pending.changes}
+        <ProposalSheet changes={pending.changes} summary={pending.summary}
           onAccept={() => { update((s) => ({ ...s, plan: pending.plan })); setPending(null); setToast(['Novos horários aceites.']) }}
           onKeep={() => { setPending(null); setToast(['Os treinos ficam como estavam, mesmo por cima dos eventos.']) }} />
       )}
@@ -314,13 +348,13 @@ function MenuItem({ icon, title, hint, onClick }: { icon: string; title: string;
   )
 }
 
-function ProposalSheet({ changes, onAccept, onKeep }: { changes: string[]; onAccept: () => void; onKeep: () => void }) {
+function ProposalSheet({ changes, summary, onAccept, onKeep }: { changes: string[]; summary?: string; onAccept: () => void; onKeep: () => void }) {
   return (
     <div className="sheet-backdrop">
       <div className="sheet" role="dialog" aria-modal="true" aria-labelledby="proposal-title">
         <header><div>
-          <h2 id="proposal-title">Novos horários para os treinos</h2>
-          <p className="muted small">O teu calendário mudou e {changes.length === 1 ? 'um treino ficou' : 'alguns treinos ficaram'} por cima de eventos. Proponho isto:</p>
+          <h2 id="proposal-title">{summary ? '✨ Proposta do treinador' : 'Novos horários para os treinos'}</h2>
+          <p className={summary ? 'small' : 'muted small'}>{summary ?? `O teu calendário mudou e ${changes.length === 1 ? 'um treino ficou' : 'alguns treinos ficaram'} por cima de eventos. Proponho isto:`}</p>
         </div></header>
         <ul className="proposal">{changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
         <div className="actions">

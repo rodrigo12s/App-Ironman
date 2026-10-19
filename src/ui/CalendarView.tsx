@@ -288,6 +288,7 @@ export function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip, onDo
               <span className="chip">{fmtMinutes(e.m.session.minutes)}</span>
               <span className="chip">{e.m.session.plannedTss} TSS</span>
             </div>
+            {e.m.session.why && <p className="small why">✨ {e.m.session.why}</p>}
             {e.m.session.movedFrom && <p className="small muted">Movida de {fmtDay(e.m.session.movedFrom)}.</p>}
             <SessionDetail m={e.m} profile={profile} today={today} onSkip={onSkip} onUnskip={onUnskip} onDone={onDone && ((s) => { onDone(s); onClose() })} />
           </>

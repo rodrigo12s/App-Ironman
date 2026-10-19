@@ -428,8 +428,8 @@ export function generatePlan(profile: Profile, overrides: Record<string, number>
   const sessions = weeks.flatMap((week) => {
     if (week.recovery) recoveryCount++
     else if (week.phase === 'base' || week.phase === 'build' || week.phase === 'peak') progression++
-    // Testes na primeira semana e em semanas alternadas de descarga
-    const testWeek = week.index === 0 || (week.recovery && recoveryCount % 2 === 0)
+    // Testes na primeira semana, outra vez passado 1 mês (para ver a evolução) e em semanas alternadas de descarga
+    const testWeek = week.index === 0 || week.index === 4 || (week.recovery && recoveryCount % 2 === 0)
     const beyond = avg && week.start > lastDated
     const gymPerWeek = beyond ? Math.max(training.gym, avg.gym) : perWeek[week.index].gym
     const footballMinutes = beyond ? Math.max(recurringFootball, avg.football) : perWeek[week.index].football

@@ -18,6 +18,16 @@ export interface TestResults {
   /** Corrida: FC média dos últimos 20 min do teste de 30 min */
   runLthr?: number
   testedOn?: string
+  /** Ainda não sabe os valores: o plano marca os testes e depois preenche-se aqui */
+  unknown?: boolean
+}
+
+/** Pormenores de uma lesão, para a IA tirar conclusões mais tarde */
+export interface InjuryDetail {
+  /** Mês em que aconteceu (yyyy-MM) */
+  when?: string
+  /** O que foi, em palavras do atleta */
+  notes?: string
 }
 
 export type Level = 'none' | 'beginner' | 'intermediate' | 'advanced'
@@ -37,6 +47,7 @@ export interface Athlete {
   longestRunMin: number
   longestSwimMin: number
   injuries: Injury[]
+  injuryDetails?: Partial<Record<Injury, InjuryDetail>>
   hasPowerMeter: boolean
   hasHrMonitor: boolean
   hasSmartTrainer: boolean
@@ -135,6 +146,8 @@ export interface Session {
   skipped?: boolean
   /** Data original, se a sessão foi movida */
   movedFrom?: string
+  /** Porque é que o treinador IA pôs a sessão neste dia e hora */
+  why?: string
 }
 
 export interface Week {
