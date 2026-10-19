@@ -109,7 +109,7 @@ export function parseIcs(text: string, from: string, to: string): Commitment[] {
  * evento aparece pelo menos 3 vezes no mesmo dia da semana e hora, junta-o
  * num compromisso semanal, mais fácil de rever.
  */
-function collapseWeekly(list: Commitment[]): Commitment[] {
+export function collapseWeekly(list: Commitment[]): Commitment[] {
   const singles = list.filter((c) => c.date)
   const groups = new Map<string, Commitment[]>()
   for (const c of singles) {

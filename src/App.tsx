@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react'
-import { setDayAvailability, skipSession } from './domain/adapt'
-import { today as todayIso } from './domain/dates'
+import { useEffect, useRef, useState } from 'react'
+import { reflowConflicts, setDayAvailability, skipSession } from './domain/adapt'
+import { addDaysIso, today as todayIso } from './domain/dates'
 import { computeTss } from './domain/load'
 import { generatePlan } from './domain/plan'
-import type { Activity, Plan, Profile, Session } from './domain/types'
+import type { Activity, AppState, CommitmentKind, GoogleSettings, Plan, Profile, Session } from './domain/types'
+import { currentToken, defaultImport, ensureTrainingCalendar, importEvents, listCalendars, requestToken, revoke, syncTrainings } from './google/gcal'
 import { useAppState } from './store'
 import { ActivitiesView } from './ui/ActivitiesView'
 import { CalendarView } from './ui/CalendarView'
+import { GoogleView } from './ui/GoogleView'
 import { ProfileView } from './ui/ProfileView'
 import { ProgressView } from './ui/ProgressView'
 import { TodayView } from './ui/TodayView'
 import { WeekView } from './ui/WeekView'
 
 type Tab = 'today' | 'calendar' | 'progress' | 'more'
-type Page = null | 'week' | 'activities' | 'profile' | 'tests' | 'backup'
+type Page = null | 'week' | 'activities' | 'profile' | 'tests' | 'backup' | 'google'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'today', label: 'Hoje', icon: '◉' },
@@ -28,6 +30,13 @@ const PAGE_TITLE: Record<Exclude<Page, null>, string> = {
   profile: 'Perfil e horário',
   tests: 'Testes e zonas',
   backup: 'Cópia de segurança',
+  google: 'Google Calendar',
+}
+
+/** Até onde se leem os eventos do Google: a prova ou meio ano, o que vier primeiro */
+const importUntil = (today: string, raceDate: string) => {
+  const half = addDaysIso(today, 182)
+  return half < raceDate ? half : addDaysIso(raceDate, 1)
 }
 
 export default function App() {
@@ -36,8 +45,11 @@ export default function App() {
   const [page, setPage] = useState<Page>(null)
   const [toast, setToast] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [gBusy, setGBusy] = useState(false)
+  const [gError, setGError] = useState<string | null>(null)
   const today = todayIso()
   const { profile, plan } = state
+  const syncing = useRef(false)
 
   useEffect(() => {
     if (toast.length === 0) return
@@ -92,6 +104,76 @@ export default function App() {
   const unskip = (id: string) => applyPlan((pl) => ({ plan: { ...pl, sessions: pl.sessions.map((s) => (s.id === id ? { ...s, skipped: false } : s)) }, changes: ['Sessão reposta no plano.'] }))
   const skip = (id: string) => applyPlan((pl, pr) => skipSession(pl, pr, id, today))
 
+  /**
+   * Lê os eventos do Google, ajusta os treinos que ficaram por cima de algum
+   * e escreve o plano no calendário "Treinos Ironman".
+   */
+  async function syncGoogle(first: boolean) {
+    if (!profile || !plan || syncing.current) return
+    syncing.current = true
+    setGBusy(true)
+    setGError(null)
+    try {
+      const token = await requestToken(first)
+      let settings: GoogleSettings = state.google ?? { importCalendars: [], writeTrainings: true, calendars: [] }
+      const cals = await listCalendars(token.value)
+      settings = { ...settings, calendars: cals.map(({ id, name, primary }) => ({ id, name, primary })) }
+      if (settings.writeTrainings && token.canWrite) {
+        settings = { ...settings, trainingCalendarId: await ensureTrainingCalendar(token.value, settings.trainingCalendarId) }
+      }
+      if (first) settings = { ...settings, importCalendars: defaultImport(cals, settings.trainingCalendarId) }
+      const importIds = settings.importCalendars.filter((id) => id !== settings.trainingCalendarId)
+
+      const old = profile.schedule.commitments
+      const keepKinds = new Map<string, CommitmentKind>(old.filter((c) => c.source === 'google').map((c) => [c.title, c.kind]))
+      const { commitments } = await importEvents(token.value, importIds, today, importUntil(today, profile.raceDate), keepKinds)
+      const nextProfile: Profile = { ...profile, schedule: { ...profile.schedule, commitments: [...old.filter((c) => c.source !== 'google'), ...commitments] } }
+      const reflow = reflowConflicts(plan, nextProfile, today)
+
+      const notes = [`${commitments.length} compromissos lidos do Google Calendar.`]
+      if (reflow.changes.length) notes.push(`${reflow.changes.length === 1 ? 'Um treino mudou' : `${reflow.changes.length} treinos mudaram`} para não ficar por cima de eventos.`, ...reflow.changes.slice(0, 2))
+      if (settings.writeTrainings && !token.canWrite) notes.push('Não deste autorização para escrever no calendário, por isso os treinos não foram escritos.')
+      if (settings.writeTrainings && token.canWrite && settings.trainingCalendarId) {
+        const r = await syncTrainings(token.value, settings.trainingCalendarId, reflow.plan.sessions, today, profile.raceDate)
+        if (r.created + r.updated + r.removed > 0) notes.push(`Calendário "Treinos Ironman" atualizado: ${r.created} novos, ${r.updated} alterados, ${r.removed} apagados.`)
+      }
+      settings = { ...settings, lastSync: new Date().toISOString() }
+      update((s) => ({ ...s, profile: nextProfile, plan: reflow.plan, google: settings }))
+      setToast(notes)
+    } catch (e) {
+      setGError(e instanceof Error ? e.message : 'Não foi possível sincronizar com o Google.')
+    } finally {
+      syncing.current = false
+      setGBusy(false)
+    }
+  }
+
+  function disconnectGoogle() {
+    revoke()
+    update((s): AppState => ({
+      ...s,
+      google: undefined,
+      profile: s.profile && { ...s.profile, schedule: { ...s.profile.schedule, commitments: s.profile.schedule.commitments.filter((c) => c.source !== 'google') } },
+    }))
+    setToast(['Desligado do Google. Os eventos do Google saíram do horário; o calendário "Treinos Ironman" fica na tua conta e podes apagá-lo lá.'])
+  }
+
+  // Com a sessão do Google ainda aberta, as mudanças no plano vão logo para o calendário
+  useEffect(() => {
+    const g = state.google
+    if (!plan || !profile || !g?.writeTrainings || !g.trainingCalendarId) return
+    const t = setTimeout(() => {
+      const token = currentToken()
+      if (!token?.canWrite || syncing.current) return
+      syncing.current = true
+      syncTrainings(token.value, g.trainingCalendarId!, plan.sessions, today, profile.raceDate)
+        .catch(() => { /* fica para a próxima sincronização */ })
+        .finally(() => { syncing.current = false })
+    }, 3000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan])
+
   const banners = (
     <>
       {saveFailed && <div className="alert alert-danger"><b>Não foi possível guardar neste browser.</b><p>Em Mais, Cópia de segurança, guarda uma cópia para não perderes os dados.</p></div>}
@@ -144,6 +226,11 @@ export default function App() {
         )}
         {page === 'profile' && <ProfileView profile={profile} hasPlan initialStep={0} onSave={saveProfile} />}
         {page === 'tests' && <ProfileView profile={profile} hasPlan initialStep={5} onSave={saveProfile} />}
+        {page === 'google' && (
+          <GoogleView settings={state.google} imported={profile.schedule.commitments.filter((c) => c.source === 'google').length}
+            busy={gBusy} error={gError} onConnect={() => syncGoogle(true)} onSync={() => syncGoogle(false)}
+            onChange={(g) => update((s) => ({ ...s, google: g }))} onDisconnect={disconnectGoogle} />
+        )}
 
         {!page && tab === 'today' && (
           <TodayView profile={profile} plan={plan} activities={state.activities} today={today}
@@ -157,6 +244,7 @@ export default function App() {
           <div className="stack">
             <h1 className="screen-title">Mais</h1>
             <ul className="menu">
+              <MenuItem icon="📅" title="Google Calendar" hint={state.google ? 'Ligado · sincronizar eventos e treinos' : 'Juntar aulas, eventos e treinos num só calendário'} onClick={() => setPage('google')} />
               <MenuItem icon="⤓" title="Importar treinos" hint="Ficheiros .FIT do relógio ou registo à mão" onClick={() => setPage('activities')} />
               <MenuItem icon="🗓" title="Perfil e horário" hint="Questionário, aulas, ginásio e futebol" onClick={() => setPage('profile')} />
               <MenuItem icon="♥" title="Testes e zonas" hint="FTP, limiar, CSS e zonas de treino" onClick={() => setPage('tests')} />

@@ -318,7 +318,7 @@ function CommitmentsStep({ profile, onChange }: { profile: Profile; onChange: (c
 
       <div className="import-box">
         <b>Calendário da universidade</b>
-        <p className="muted small">Exporta o horário em formato .ics (no portal académico, no Google Calendar em Definições, Importar e exportar, ou no Outlook) e escolhe o ficheiro aqui. Os exames também entram.</p>
+        <p className="muted small">Exporta o horário em formato .ics (no portal académico, ou no Outlook) e escolhe o ficheiro aqui. Os exames também entram. Se usas o Google Calendar, é mais fácil ligá-lo em Mais, Google Calendar.</p>
         <button onClick={() => fileRef.current?.click()}>Importar ficheiro .ics</button>
         <input ref={fileRef} type="file" accept=".ics,text/calendar" hidden onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} />
         {msg && <p className="small">{msg}</p>}

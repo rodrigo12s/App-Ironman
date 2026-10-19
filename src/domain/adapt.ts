@@ -99,20 +99,36 @@ export function skipSession(plan: Plan, profile: Profile, id: string, today: str
  * As sessões que deixam de caber são movidas, encurtadas ou retiradas, por esta ordem.
  */
 export function setDayAvailability(plan: Plan, profile: Profile, date: string, minutes: number, today: string): AdaptResult {
-  let next: Plan = { ...plan, dayOverrides: { ...plan.dayOverrides, [date]: minutes } }
   const changes: string[] = []
+  const next = refitDay({ ...plan, dayOverrides: { ...plan.dayOverrides, [date]: minutes } }, profile, date, today, changes)
+  if (changes.length === 0) changes.push('O plano desse dia já cabe no tempo que tens.')
+  return { plan: { ...next, sessions: sortSessions(next.sessions) }, changes }
+}
+
+/**
+ * Volta a encaixar as sessões de um dia nas janelas livres, das mais
+ * importantes para as menos. As que deixam de caber são movidas, encurtadas
+ * ou retiradas, por esta ordem.
+ */
+function refitDay(plan: Plan, profile: Profile, date: string, today: string, changes: string[]): Plan {
+  let next = plan
   const daySessions = active(next, date)
     .filter((s) => s.kind !== 'race' && s.kind !== 'fixed')
     .sort((a, b) => priority(b) - priority(a))
 
-  // Volta a encaixar as sessões do dia nas janelas que sobram, das mais importantes para as menos
-  let slots = freeSlots(profile, date, minutes)
+  let slots = freeSlots(profile, date, next.dayOverrides[date])
   const leftOver: Session[] = []
   for (const s of daySessions) {
-    const slot = bestSlot(slots)
+    // Fica à mesma hora se ainda couber; senão vai para a maior janela que sobra
+    const same = s.start !== undefined && slots.find((w) => w.start <= s.start! && w.end >= s.start! + s.minutes)
+    const slot = same || bestSlot(slots)
     if (slot && slot.end - slot.start >= s.minutes) {
-      next = { ...next, sessions: next.sessions.map((x) => (x.id === s.id ? { ...x, start: slot.start } : x)) }
-      slots = subtract(slots, [{ start: slot.start, end: slot.start + s.minutes }])
+      const start = same ? s.start! : slot.start
+      if (start !== s.start) {
+        next = { ...next, sessions: next.sessions.map((x) => (x.id === s.id ? { ...x, start } : x)) }
+        if (s.start !== undefined) changes.push(`"${s.title}" de ${label(date)} passa para as ${toHHMM(start)}.`)
+      }
+      slots = subtract(slots, [{ start, end: start + s.minutes }])
     } else leftOver.push(s)
   }
 
@@ -132,7 +148,27 @@ export function setDayAvailability(plan: Plan, profile: Profile, date: string, m
       changes.push(`"${s.title}" fica de fora.`)
     }
   }
-  if (changes.length === 0) changes.push('O plano desse dia já cabe no tempo que tens.')
+  return next
+}
+
+/** Há sessões deste dia que já não cabem nas janelas livres (ex.: um evento novo no calendário)? */
+function hasConflict(plan: Plan, profile: Profile, date: string): boolean {
+  const slots = freeSlots(profile, date, plan.dayOverrides[date])
+  return active(plan, date)
+    .filter((s) => s.kind !== 'race' && s.kind !== 'fixed' && s.start !== undefined)
+    .some((s) => !slots.some((w) => w.start <= s.start! && w.end >= s.start! + s.minutes))
+}
+
+/**
+ * Depois de mudarem os compromissos (ex.: sincronizar o Google Calendar),
+ * ajusta só os dias de hoje em diante em que algum treino ficou por cima de
+ * um compromisso. O resto do plano fica igual.
+ */
+export function reflowConflicts(plan: Plan, profile: Profile, today: string): AdaptResult {
+  let next = plan
+  const changes: string[] = []
+  const dates = [...new Set(plan.sessions.filter((s) => s.date >= today).map((s) => s.date))].sort()
+  for (const d of dates) if (hasConflict(next, profile, d)) next = refitDay(next, profile, d, today, changes)
   return { plan: { ...next, sessions: sortSessions(next.sessions) }, changes }
 }
 

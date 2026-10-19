@@ -71,7 +71,7 @@ export interface Commitment {
   until?: string
   /** Datas em que não acontece (feriados, férias) */
   except?: string[]
-  source: 'manual' | 'ics'
+  source: 'manual' | 'ics' | 'google'
 }
 
 export interface Schedule {
@@ -158,11 +158,24 @@ export interface Wellness {
   soreness?: string
 }
 
+/** Ligação ao Google Calendar */
+export interface GoogleSettings {
+  /** Calendários de onde vêm os compromissos */
+  importCalendars: string[]
+  /** Escrever os treinos no calendário "Treinos Ironman" */
+  writeTrainings: boolean
+  trainingCalendarId?: string
+  /** Nomes dos teus calendários, para os mostrar sem pedir de novo ao Google */
+  calendars: { id: string; name: string; primary?: boolean }[]
+  lastSync?: string
+}
+
 export interface AppState {
   profile: Profile | null
   plan: Plan | null
   activities: Activity[]
   wellness: Wellness[]
+  google?: GoogleSettings
   /** Dados da versão antiga da app, para pré-preencher o questionário */
   legacy?: { raceName: string; raceDate: string; tests: TestResults }
 }

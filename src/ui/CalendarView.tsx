@@ -254,13 +254,13 @@ export function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip, onDo
         )}
         {e.type === 'commitment' && (
           <>
-            <div className="chips left"><span className="chip">{KIND_LABEL[e.c.kind]}</span><span className="chip">{e.c.source === 'ics' ? 'Do calendário importado' : 'Adicionado por ti'}</span></div>
+            <div className="chips left"><span className="chip">{KIND_LABEL[e.c.kind]}</span><span className="chip">{e.c.source === 'google' ? 'Do Google Calendar' : e.c.source === 'ics' ? 'Do calendário importado' : 'Adicionado por ti'}</span></div>
             <p className="small">
               {e.c.weekday !== undefined
                 ? `Todas as ${WEEKDAYS[e.c.weekday].toLowerCase()}s${e.c.from ? ` desde ${fmtDay(e.c.from, { day: 'numeric', month: 'short' })}` : ''}${e.c.until ? ` até ${fmtDay(e.c.until, { day: 'numeric', month: 'short' })}` : ''}.`
                 : 'Só neste dia.'}
             </p>
-            <p className="small muted">Os treinos não são marcados por cima e ficam 15 min de margem antes e depois. Para mudar ou apagar, vai a Perfil, passo Aulas e compromissos.</p>
+            <p className="small muted">Os treinos não são marcados por cima e ficam 15 min de margem antes e depois. {e.c.source === 'google' ? 'Para mudar, altera no Google Calendar e sincroniza em Mais.' : 'Para mudar ou apagar, vai a Perfil, passo Aulas e compromissos.'}</p>
           </>
         )}
         {e.type === 'activity' && (
