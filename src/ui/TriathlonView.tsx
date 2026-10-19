@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { isTriathlon } from '../ai/key'
 import { matchSessions, type SessionMatch } from '../domain/compliance'
 import { addDaysIso, mondayOf } from '../domain/dates'
+import { formatDistance, progressionToRace, raceLabel, raceOf, sessionDistance } from '../domain/race'
 import { toHHMM } from '../domain/schedule'
 import type { Activity, Plan, Profile, Session } from '../domain/types'
 import { DetailSheet } from './CalendarView'
@@ -45,6 +46,15 @@ export function TriathlonView({ profile, plan, activities, today, hasKey, busy, 
     if (plan.weeks.some((w) => w.start === next)) setMonday(next)
   }
   const canAsk = sunday >= today
+  const race = raceOf(profile)
+  const prog = useMemo(() => progressionToRace(profile, plan.sessions, plan.weeks), [profile, plan])
+  const thisWeek = prog.find((x) => x.start === monday)
+  const best = (k: 'swim' | 'bike' | 'run') => prog.reduce((a, x) => (x[k] > a[k] ? x : a), prog[0])
+  const ROWS = [
+    { k: 'swim' as const, icon: '🏊', dist: (x: typeof prog[0]) => formatDistance({ swimM: x.swimM }), race: formatDistance({ swimM: race.swimM }) },
+    { k: 'bike' as const, icon: '🚴', dist: (x: typeof prog[0]) => formatDistance({ bikeKm: x.bikeKm }), race: formatDistance({ bikeKm: race.bikeKm }) },
+    { k: 'run' as const, icon: '🏃', dist: (x: typeof prog[0]) => formatDistance({ runKm: x.runKm }), race: formatDistance({ runKm: race.runKm }) },
+  ]
 
   return (
     <div className="stack">
@@ -71,6 +81,27 @@ export function TriathlonView({ profile, plan, activities, today, hasKey, busy, 
         <p className="muted small">O ginásio e o futebol não aparecem aqui: estão no Calendário e o plano conta com eles.</p>
       </section>
 
+      {thisWeek && (
+        <section className="card">
+          <h2>Rumo à prova</h2>
+          <p className="muted small">{raceLabel(race)}: {formatDistance({ swimM: race.swimM, bikeKm: race.bikeKm, runKm: race.runKm })}. O treino mais longo de cada modalidade nesta semana, ao lado do mais longo do plano.</p>
+          <ul className="race-prog">
+            {ROWS.map((r) => {
+              const top = best(r.k)
+              return (
+                <li key={r.k}>
+                  <span aria-hidden>{r.icon}</span>
+                  <div>
+                    <div className="bar"><i style={{ width: `${Math.min(100, thisWeek[r.k])}%` }} /><b style={{ left: `${Math.min(100, top[r.k])}%` }} /></div>
+                    <p className="tiny muted">Esta semana {thisWeek[r.k] ? `≈ ${r.dist(thisWeek)} (${thisWeek[r.k]}%)` : 'nenhum'} · no máximo ≈ {r.dist(top)} na semana {top.week} · prova {r.race}</p>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
       <ul className="upcoming tri-list">
         {active.length === 0 && <li className="muted small">Sem treinos de triatlo nesta semana.</li>}
         {active.map((m) => (
@@ -79,7 +110,7 @@ export function TriathlonView({ profile, plan, activities, today, hasKey, busy, 
               <span className="up-day">{fmtDay(m.session.date, { weekday: 'short' }).replace('.', '')}<br /><span className="muted tiny">{m.session.start !== undefined ? toHHMM(m.session.start) : ''}</span></span>
               <span className="up-icon" aria-hidden>{SPORT_ICON[m.session.sport]}</span>
               <span className="up-title">{m.session.title}{m.session.key && <span className="key">chave</span>}{m.session.why && <span className="muted tiny tri-why">✨ {m.session.why}</span>}</span>
-              <span className="up-meta">{fmtMinutes(m.session.minutes)}<br /><span className={`status ${STATUS[m.status].cls}`}>{STATUS[m.status].label}</span></span>
+              <span className="up-meta">{fmtMinutes(m.session.minutes)}<br /><span className="muted tiny">≈ {formatDistance(sessionDistance(m.session, profile))}</span><br /><span className={`status ${STATUS[m.status].cls}`}>{STATUS[m.status].label}</span></span>
             </button>
           </li>
         ))}

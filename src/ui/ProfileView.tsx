@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { addDaysIso, mondayOf, today } from '../domain/dates'
 import { parseIcs } from '../domain/ics'
 import { peakTarget } from '../domain/plan'
+import { RACE_PRESETS, raceMinutes, raceOf } from '../domain/race'
 import { fromHHMM, toHHMM, typicalWeek, windowsFromLimits } from '../domain/schedule'
-import type { Athlete, Commitment, CommitmentKind, GoogleSettings, Injury, Level, Profile, TestResults, Weekday } from '../domain/types'
+import type { Athlete, Commitment, CommitmentKind, GoogleSettings, Injury, Level, Profile, RaceDistance, TestResults, Weekday } from '../domain/types'
 import { cssPer100, formatPace, ftp, hrZones, paceZones, parsePace, powerZones, runThresholdPace, type Zone } from '../domain/zones'
 import { ALLOWED_HOSTS, fetchCommitments, importSummary, requestToken } from '../google/gcal'
 import { WEEKDAYS, fmtMinutes } from './format'
@@ -37,6 +38,7 @@ export const defaultProfile = (): Profile => ({
   name: '',
   raceName: '',
   raceDate: addDaysIso(today(), 7 * 36),
+  race: { type: 'full', ...RACE_PRESETS.full },
   planStart: today(),
   athlete: defaultAthlete(),
   schedule: {
@@ -96,6 +98,10 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
   }, [p, profile])
 
   const setA = (patch: Partial<Athlete>) => setP((x) => ({ ...x, athlete: { ...x.athlete, ...patch } }))
+  const race = raceOf(p)
+  const setRace = (r: RaceDistance) => setP((x) => ({ ...x, race: r }))
+  const estimate = raceMinutes(p)
+  const minWeeks = race.bikeKm >= 150 ? 24 : race.bikeKm >= 80 ? 16 : 10
   const weeksToRace = Math.floor((new Date(p.raceDate).getTime() - new Date(p.planStart).getTime()) / (7 * 864e5))
   const free = typicalWeek(p, mondayOf(p.planStart))
   const freeTotal = free.reduce((a, b) => a + b, 0)
@@ -142,7 +148,25 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
             <label>Idade<input id="q-age" type="number" min={14} max={90} value={p.athlete.age ?? ''} onChange={(e) => setA({ age: e.target.value ? Number(e.target.value) : undefined })} /></label>
           </div>
           <p className="muted">{weeksToRace > 0 ? `${weeksToRace} semanas de preparação.` : 'A data da prova tem de ser depois do início.'}
-            {weeksToRace > 0 && weeksToRace < 24 && ' Para um primeiro Ironman, o ideal são 24 semanas ou mais.'}</p>
+            {weeksToRace > 0 && weeksToRace < minWeeks && ` Para esta distância, o ideal são ${minWeeks} semanas ou mais.`}</p>
+          <fieldset className="choice">
+            <legend>Que distância?</legend>
+            <div className="choice-row">
+              {(Object.keys(RACE_PRESETS) as (keyof typeof RACE_PRESETS)[]).map((t) => (
+                <Radio key={t} name="race-type" checked={race.type === t} onChange={() => setRace({ type: t, ...RACE_PRESETS[t] })}
+                  label={RACE_PRESETS[t].label} hint={`${RACE_PRESETS[t].swimM} m · ${RACE_PRESETS[t].bikeKm} km · ${String(RACE_PRESETS[t].runKm).replace('.', ',')} km`} />
+              ))}
+              <Radio name="race-type" checked={race.type === 'custom'} onChange={() => setRace({ ...race, type: 'custom' })} label="Outra" hint="Escreve as distâncias" />
+            </div>
+            {race.type === 'custom' && (
+              <div className="grid3">
+                <label>Natação (m)<input id="q-swim-m" type="number" min={100} max={10000} step={50} value={race.swimM} onChange={(e) => setRace({ ...race, swimM: Number(e.target.value) || 0 })} /></label>
+                <label>Bicicleta (km)<input id="q-bike-km" type="number" min={5} max={400} value={race.bikeKm} onChange={(e) => setRace({ ...race, bikeKm: Number(e.target.value) || 0 })} /></label>
+                <label>Corrida (km)<input id="q-run-km" type="number" min={1} max={100} step={0.1} value={race.runKm} onChange={(e) => setRace({ ...race, runKm: Number(e.target.value) || 0 })} /></label>
+              </div>
+            )}
+            <p className="muted small">Pela tua experiência, a prova deve levar cerca de {fmtMinutes(estimate.total)} ({fmtMinutes(estimate.swim)} a nadar, {fmtMinutes(estimate.bike)} de bicicleta, {fmtMinutes(estimate.run)} a correr). O plano faz as sessões longas crescer até perto destas distâncias.</p>
+          </fieldset>
           <fieldset className="choice">
             <legend>Qual é o objetivo?</legend>
             <div className="choice-row">
@@ -150,7 +174,7 @@ export function ProfileView({ profile, legacy, hasPlan, initialStep, google, onG
             <Radio name="goal" checked={p.athlete.goal === 'time'} onChange={() => setA({ goal: 'time' })} label="Fazer um tempo" hint="Tenho uma meta de horas" />
             </div>
             {p.athlete.goal === 'time' && (
-              <label>Tempo-alvo (horas)<input id="q-target" type="number" min={8} max={17} step={0.5} value={p.athlete.targetHours ?? 13} onChange={(e) => setA({ targetHours: Number(e.target.value) })} /></label>
+              <label>Tempo-alvo (horas)<input id="q-target" type="number" min={1} max={17} step={0.25} value={p.athlete.targetHours ?? Math.round(estimate.total / 15) / 4} onChange={(e) => setA({ targetHours: Number(e.target.value) })} /></label>
             )}
           </fieldset>
         </section>

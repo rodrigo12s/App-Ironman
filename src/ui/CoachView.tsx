@@ -13,7 +13,7 @@ export function CoachView({ hasKey, onSave }: Props) {
     <div className="stack">
       <section className="card">
         <h2>Treinador IA</h2>
-        <p>O treinador (Claude, da Anthropic) olha para a tua semana, as tuas aulas, as lesões que descreveste e o cansaço acumulado, e propõe a melhor distribuição dos treinos de triatlo. Nada muda sem aceitares.</p>
+        <p>O treinador (Claude, da Anthropic) olha para a tua semana, as tuas aulas, as lesões que descreveste, o que fizeste nas últimas semanas e as distâncias da tua prova. Escreve cada treino em concreto (séries, distâncias e ritmos), a evoluir de semana para semana, e escolhe o melhor dia e hora para cada um. Nada muda sem aceitares.</p>
         {hasKey ? (
           <>
             <p className="small"><span className="dot ok" aria-hidden /> Ligado. Usa o botão "Distribuir esta semana com IA" no separador Triatlo.</p>

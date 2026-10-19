@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { formatDistance, sessionDistance } from '../domain/race'
 import { addDaysIso, mondayOf } from '../domain/dates'
 import { matchSessions, type SessionMatch } from '../domain/compliance'
 import { commitmentsOn, toHHMM } from '../domain/schedule'
@@ -287,6 +288,7 @@ export function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip, onDo
               <span className="chip">{e.m.session.kind === 'fixed' ? 'Do teu horário' : SPORT_LABEL[e.m.session.sport]}</span>
               <span className="chip">{fmtMinutes(e.m.session.minutes)}</span>
               <span className="chip">{e.m.session.plannedTss} TSS</span>
+              {['swim', 'bike', 'run', 'brick'].includes(e.m.session.sport) && <span className="chip">≈ {formatDistance(sessionDistance(e.m.session, profile))}</span>}
             </div>
             {e.m.session.why && <p className="small why">✨ {e.m.session.why}</p>}
             {e.m.session.movedFrom && <p className="small muted">Movida de {fmtDay(e.m.session.movedFrom)}.</p>}

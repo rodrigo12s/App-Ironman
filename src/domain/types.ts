@@ -112,10 +112,22 @@ export interface Schedule {
   commitments: Commitment[]
 }
 
+export type RaceType = 'sprint' | 'olympic' | 'half' | 'full' | 'custom'
+
+/** Distâncias da prova */
+export interface RaceDistance {
+  type: RaceType
+  swimM: number
+  bikeKm: number
+  runKm: number
+}
+
 export interface Profile {
   name: string
   raceName: string
   raceDate: string // yyyy-MM-dd
+  /** Sem isto, o plano conta com um Ironman completo */
+  race?: RaceDistance
   planStart: string // yyyy-MM-dd
   athlete: Athlete
   schedule: Schedule
@@ -148,6 +160,8 @@ export interface Session {
   movedFrom?: string
   /** Porque é que o treinador IA pôs a sessão neste dia e hora */
   why?: string
+  /** Distância alvo definida pelo treinador IA (sem isto, estima-se pelos ritmos) */
+  target?: { swimM?: number; bikeKm?: number; runKm?: number }
 }
 
 export interface Week {

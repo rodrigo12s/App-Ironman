@@ -412,3 +412,12 @@ p.why { background: var(--soft); border-radius: 8px; padding: 8px 10px; }
 .week-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .week-nav > div { text-align: center; }
 textarea { font: inherit; width: 100%; }
+
+/* Rumo à prova */
+.race-prog { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 10px; }
+.race-prog li { display: grid; grid-template-columns: 24px 1fr; gap: 8px; align-items: start; }
+.race-prog .bar { position: relative; height: 10px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); }
+.race-prog .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: var(--accent); }
+.race-prog .bar b { position: absolute; top: -3px; width: 2px; height: 16px; background: var(--text); opacity: .6; }
+.race-prog p { margin: 4px 0 0; }
+.steps-list .dist { white-space: nowrap; }

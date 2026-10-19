@@ -1,15 +1,10 @@
 import { addDaysIso, daysBetween, mondayOf, weekdayOf } from './dates'
 import { commitmentsOn, freeSlots, isTrainingCommitment, subtract, total, typicalWeek, weeklyTraining } from './schedule'
+import { formatDistance, longLimits, raceMinutes, raceOf, volumeFactor } from './race'
 import type { Athlete, Level, Phase, Plan, Profile, Session, Sport, Step, TimeWindow, Week } from './types'
 
 /** Fator de intensidade típico de cada zona, usado para estimar a carga planeada */
 const ZONE_IF = [0, 0.55, 0.7, 0.83, 0.95, 1.08]
-
-/** Limites para não exagerar num primeiro Ironman */
-const MAX_LONG_RIDE = 360
-const MAX_LONG_RUN = 150
-const MAX_LONG_RUN_INJURED = 120
-const MAX_SWIM = 75
 
 const RUN_INJURIES = ['knee', 'shin', 'achilles', 'plantar', 'hip']
 export const hasRunInjury = (a: Athlete) => a.injuries.some((i) => RUN_INJURIES.includes(i))
@@ -29,7 +24,8 @@ export function peakTarget(profile: Profile): number {
   const a = profile.athlete
   const capacity = typicalWeek(profile, mondayOf(profile.planStart)).reduce((x, y) => x + y, 0)
   const avgLevel = (LEVEL_SCORE[a.level.swim] + LEVEL_SCORE[a.level.bike] + LEVEL_SCORE[a.level.run]) / 3
-  const goal = a.goal === 'time' ? 900 : avgLevel < 1.5 ? 720 : 780
+  // Para um Ironman; provas mais curtas pedem menos volume
+  const goal = (a.goal === 'time' ? 900 : avgLevel < 1.5 ? 720 : 780) * volumeFactor(profile)
   const available = a.availableHours ? a.availableHours * 60 : Infinity
   return Math.round(Math.min(capacity * 0.9, goal, available))
 }
@@ -138,6 +134,8 @@ export function sportShares(athlete: Athlete, footballMinutes: number, weekMinut
 
 interface WeekCtx {
   athlete: Athlete
+  /** Tetos e mínimos das sessões longas, pela distância da prova */
+  limits: ReturnType<typeof longLimits>
   testWeek: boolean
   /** Semanas de progressão já feitas (para subir as sessões longas aos poucos) */
   progression: number
@@ -146,7 +144,7 @@ interface WeekCtx {
 }
 
 export function weekDrafts(week: Week, ctx: WeekCtx): Draft[] {
-  const { athlete, testWeek, progression } = ctx
+  const { athlete, testWeek, progression, limits: L } = ctx
   const t = week.targetMinutes
   const shares = sportShares(athlete, ctx.footballMinutes, t)
   const swim = t * shares.swim
@@ -192,7 +190,7 @@ export function weekDrafts(week: Week, ctx: WeekCtx): Draft[] {
   // Natação: quem está a começar faz mais técnica
   const swimBeginner = LEVEL_SCORE[athlete.level.swim] <= 1
   const swimSessions = testWeek ? 2 : 3
-  const swimEach = Math.min(MAX_SWIM, Math.max(30, Math.round(swim / swimSessions / 5) * 5))
+  const swimEach = Math.min(L.swimSession, Math.max(30, Math.round(swim / swimSessions / 5) * 5))
   const technique = phase === 'base' || swimBeginner
   d.push({ sport: 'swim', kind: 'endurance', title: technique ? 'Natação técnica' : 'Natação contínua', minutes: swimEach, key: false,
     steps: (m) => wuCd(m, [{ label: technique ? 'Drills: braçada, respiração bilateral, posição do corpo' : 'Nado contínuo', minutes: Math.round(m * 0.5), zone: 2 }]) })
@@ -201,22 +199,22 @@ export function weekDrafts(week: Week, ctx: WeekCtx): Draft[] {
       steps: (m) => wuCd(m, intervals(Math.max(4, Math.round(m / 10)), swimBeginner ? 2 : 4, 4, 1, swimBeginner ? '100 m' : 'CSS')) })
   }
   if (swimSessions === 3) {
-    const longSwimCap = Math.min(MAX_SWIM + 15, Math.max(30, athlete.longestSwimMin) + progression * 3)
+    const longSwimCap = Math.min(L.swimCap, Math.max(30, athlete.longestSwimMin) + progression * 3)
     d.push({ sport: 'swim', kind: 'long', title: phase === 'peak' ? 'Natação longa (águas abertas, se possível)' : 'Natação longa', minutes: Math.min(longSwimCap, swimEach + 15), key: phase === 'peak',
       steps: (m) => wuCd(m, [{ label: 'Nado contínuo a ritmo de prova', minutes: Math.round(m * 0.6), zone: 3 }]) })
   }
 
   // Bicicleta: a longa sobe ~15 min por semana a partir da mais longa que já fizeste
-  const longRideCap = Math.min(MAX_LONG_RIDE, Math.max(60, athlete.longestRideMin) + progression * 15)
-  // Mínimos para chegar à prova com a resistência necessária: ~3h30 na construção e 5 h no pico
+  const longRideCap = Math.min(L.rideCap, Math.max(60, athlete.longestRideMin) + progression * 15)
+  // Mínimos para chegar à prova com a resistência necessária (num Ironman: ~3h30 na construção e 5 h no pico)
   // e nunca muito abaixo do que já fazes hoje
-  const rideFloor = phase === 'peak' ? 300 : phase === 'build' ? 210 : Math.max(60, Math.round((athlete.longestRideMin * 0.8) / 15) * 15)
+  const rideFloor = Math.min(longRideCap, phase === 'peak' ? L.ridePeak : phase === 'build' ? L.rideBuild : Math.max(60, Math.round((athlete.longestRideMin * 0.8) / 15) * 15))
   const longRide = Math.min(longRideCap, Math.max(rideFloor, Math.round((bike * 0.5) / 15) * 15))
   const midRide = Math.max(45, Math.round((bike * 0.27) / 5) * 5)
   const shortRide = Math.max(40, Math.round((bike * 0.23) / 5) * 5)
   const isBrick = phase === 'build' || phase === 'peak'
   if (isBrick && !week.recovery) {
-    const brickRun = phase === 'peak' ? 30 : 20
+    const brickRun = Math.min(phase === 'peak' ? 30 : 20, Math.round(L.runCap / 3 / 5) * 5)
     d.push({ sport: 'brick', kind: 'brick', title: 'Brick: bicicleta longa + corrida', minutes: longRide + brickRun, key: true, long: true,
       steps: (m) => {
         const bikeM = m - brickRun
@@ -242,9 +240,8 @@ export function weekDrafts(week: Week, ctx: WeekCtx): Draft[] {
     steps: (m) => [{ label: 'Rolar solto, cadência alta', minutes: m, zone: 1 }] })
 
   // Corrida: a longa sobe ~5 min por semana; com lesões o teto é mais baixo
-  const runCap = hasRunInjury(athlete) ? MAX_LONG_RUN_INJURED : MAX_LONG_RUN
-  const longRunCap = Math.min(runCap, Math.max(30, athlete.longestRunMin) + progression * 5)
-  const runFloor = phase === 'peak' ? 120 : phase === 'build' ? 90 : Math.max(30, Math.round((athlete.longestRunMin * 0.75) / 5) * 5)
+  const longRunCap = Math.min(L.runCap, Math.max(30, athlete.longestRunMin) + progression * 5)
+  const runFloor = Math.min(longRunCap, phase === 'peak' ? L.runPeak : phase === 'build' ? L.runBuild : Math.max(30, Math.round((athlete.longestRunMin * 0.75) / 5) * 5))
   const longRun = Math.min(longRunCap, Math.max(runFloor, Math.round((run * 0.45) / 5) * 5))
   const easyRun = Math.max(25, Math.round((run * 0.3) / 5) * 5)
   const tempoRun = Math.max(30, Math.round((run * 0.25) / 5) * 5)
@@ -397,13 +394,22 @@ export function scaleSteps(steps: Step[], minutes: number): Step[] {
   return steps.map((s) => ({ ...s, minutes: Math.max(0.5, Math.round(s.minutes * f * 2) / 2) }))
 }
 
-function raceSession(date: string, name: string): Session {
+/** Carga da prova: provas curtas fazem-se mais perto do limiar */
+const raceTss = (minutes: number) => {
+  const f = minutes < 100 ? 0.95 : minutes < 200 ? 0.88 : minutes < 420 ? 0.8 : 0.68
+  return Math.round((minutes / 60) * f * f * 100)
+}
+
+function raceSession(profile: Profile): Session {
+  const r = raceOf(profile)
+  const m = raceMinutes(profile)
   const steps: Step[] = [
-    { label: 'Natação 3,8 km', minutes: 80, zone: 2 },
-    { label: 'Bicicleta 180 km', minutes: 390, zone: 3 },
-    { label: 'Maratona 42,2 km', minutes: 300, zone: 2 },
+    { label: `Natação ${formatDistance({ swimM: r.swimM })}`, minutes: m.swim, zone: 2 },
+    { label: `Bicicleta ${formatDistance({ bikeKm: r.bikeKm })}`, minutes: m.bike, zone: 3 },
+    { label: `${r.runKm >= 42 ? 'Maratona' : 'Corrida'} ${formatDistance({ runKm: r.runKm })}`, minutes: m.run, zone: r.runKm >= 21 ? 2 : 3 },
   ]
-  return { id: `${date}-race`, date, sport: 'brick', kind: 'race', title: name || 'Ironman', minutes: 770, key: true, steps, plannedTss: 280, start: 7 * 60 }
+  const date = profile.raceDate
+  return { id: `${date}-race`, date, sport: 'brick', kind: 'race', title: profile.raceName || 'Prova', minutes: m.total, key: true, steps, plannedTss: raceTss(m.total), start: 7 * 60 }
 }
 
 export function generatePlan(profile: Profile, overrides: Record<string, number> = {}): Plan {
@@ -423,6 +429,7 @@ export function generatePlan(profile: Profile, overrides: Record<string, number>
     football: Math.round(known.reduce((a, x) => a + x.football, 0) / known.length),
   } : null
   const recurringFootball = profile.schedule.commitments.filter((c) => c.kind === 'football' && c.weekday !== undefined).reduce((a, c) => a + c.end - c.start, 0)
+  const limits = longLimits(profile, hasRunInjury(profile.athlete))
   let recoveryCount = 0
   let progression = 0
   const sessions = weeks.flatMap((week) => {
@@ -433,9 +440,9 @@ export function generatePlan(profile: Profile, overrides: Record<string, number>
     const beyond = avg && week.start > lastDated
     const gymPerWeek = beyond ? Math.max(training.gym, avg.gym) : perWeek[week.index].gym
     const footballMinutes = beyond ? Math.max(recurringFootball, avg.football) : perWeek[week.index].football
-    const ctx = { athlete: profile.athlete, testWeek, progression: Math.max(0, progression - 1), gymPerWeek, footballMinutes }
+    const ctx = { athlete: profile.athlete, limits, testWeek, progression: Math.max(0, progression - 1), gymPerWeek, footballMinutes }
     return placeWeek(week, weekDrafts(week, ctx), profile, overrides)
   })
-  sessions.push(raceSession(profile.raceDate, profile.raceName))
+  sessions.push(raceSession(profile))
   return { generatedAt: new Date().toISOString(), weeks, sessions, dayOverrides: overrides }
 }
