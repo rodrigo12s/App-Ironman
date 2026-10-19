@@ -6,7 +6,7 @@ import { fromHHMM, toHHMM, typicalWeek } from '../domain/schedule'
 import type { Athlete, Commitment, CommitmentKind, GoogleSettings, Injury, Level, Profile, TestResults, TimeWindow, Weekday } from '../domain/types'
 import { cssPer100, formatPace, ftp, hrZones, paceZones, parsePace, powerZones, runThresholdPace, type Zone } from '../domain/zones'
 import { suggestWindows } from '../domain/suggest'
-import { ALLOWED_HOSTS, fetchCommitments, requestToken } from '../google/gcal'
+import { ALLOWED_HOSTS, fetchCommitments, importSummary, requestToken } from '../google/gcal'
 import { WEEKDAYS, fmtMinutes } from './format'
 import { KIND_LABEL, ScheduleGrid } from './ScheduleGrid'
 
@@ -335,7 +335,7 @@ function CommitmentsStep({ profile, google, onGoogle, onChange }: { profile: Pro
       const res = await fetchCommitments(token.value, google, list, profile.planStart, profile.raceDate)
       onChange(res.commitments)
       onGoogle!(res.settings)
-      setGMsg(res.imported ? `Li ${res.imported} compromissos do teu Google Calendar. Revê os tipos abaixo: o ginásio e o futebol contam como treino.` : 'Não encontrei eventos com hora nos próximos meses.')
+      setGMsg(`${importSummary(res.stats)}${res.imported ? ' Revê os tipos abaixo: o ginásio e o futebol contam como treino.' : ''}`)
     } catch (e) {
       setGMsg(e instanceof Error ? e.message : 'Não foi possível ligar ao Google.')
     } finally {

@@ -9,7 +9,7 @@ import type { Profile, Session } from '../domain/types'
 const ev = (id: string, start: string, end: string, extra: Partial<GEvent> = {}): GEvent => ({ id, summary: 'Aula de Cálculo', start: { dateTime: start }, end: { dateTime: end }, ...extra })
 
 describe('importar eventos do Google', () => {
-  it('converte eventos com hora e ignora os de dia inteiro, cancelados, livres e recusados', () => {
+  it('converte eventos com hora e ignora os de dia inteiro, cancelados e recusados', () => {
     const list = eventsToCommitments([
       ev('a', '2026-10-21T09:30:00+01:00', '2026-10-21T11:00:00+01:00'),
       { id: 'b', summary: 'Feriado', start: { date: '2026-10-22' }, end: { date: '2026-10-23' } },
@@ -18,9 +18,16 @@ describe('importar eventos do Google', () => {
       ev('e', '2026-10-22T14:00:00+01:00', '2026-10-22T15:00:00+01:00', { attendees: [{ self: true, responseStatus: 'declined' }] }),
       ev('f', '2026-10-23T19:00:00+01:00', '2026-10-23T20:30:00+01:00', { summary: 'Treino futebol' }),
     ])
-    expect(list).toHaveLength(2)
+    expect(list).toHaveLength(3)
     expect(list[0]).toMatchObject({ id: 'g-a', date: '2026-10-21', start: 570, end: 660, kind: 'class', source: 'google' })
-    expect(list[1].kind).toBe('football')
+    // Marcado como "disponível" continua a contar: muitos horários da universidade vêm assim
+    expect(list[1]).toMatchObject({ id: 'g-d', start: 720 })
+    expect(list[2].kind).toBe('football')
+  })
+
+  it('um evento de vários dias ocupa cada dia', () => {
+    const list = eventsToCommitments([ev('t', '2026-10-23T18:00:00+01:00', '2026-10-25T20:00:00+00:00', { summary: 'Viagem' })])
+    expect(list.map((c) => [c.date, c.start, c.end])).toEqual([['2026-10-23', 1080, 1440], ['2026-10-24', 0, 1440], ['2026-10-25', 0, 1200]])
   })
 
   it('junta aulas repetidas num compromisso semanal e mantém o tipo escolhido à mão', () => {

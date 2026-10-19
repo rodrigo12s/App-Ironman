@@ -395,3 +395,5 @@ p.danger { color: var(--danger); }
 .suggest-box { background: var(--soft); border-radius: 10px; padding: 10px 12px; margin: 12px 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .suggest-box p { margin: 0; }
 details.import-box summary { cursor: pointer; }
+.g-stats { list-style: none; padding: 0; margin: 4px 0; display: flex; flex-direction: column; gap: 4px; }
+.g-stats li { display: flex; justify-content: space-between; gap: 8px; }

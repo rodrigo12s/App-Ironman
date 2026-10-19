@@ -52,7 +52,15 @@ export function GoogleView({ settings, imported, busy, error, onConnect, onSync,
     <div className="stack">
       <section className="card">
         <div className="g-status"><span className="dot ok" aria-hidden /> <b>Ligado ao Google Calendar</b></div>
-        <p className="small">Última sincronização: {last}. {imported > 0 && `${imported} compromissos vindos do Google.`}</p>
+        <p className="small">Última sincronização: {last}.</p>
+        {settings.lastImport && settings.lastImport.length > 0 && (
+          <ul className="g-stats small">
+            {settings.lastImport.map((c) => (
+              <li key={c.name}><span>{c.name}</span><span className="muted">{c.failed ? 'não foi possível ler' : `${c.events} eventos${c.allDay ? ` · ${c.allDay} de dia inteiro, fora` : ''}`}</span></li>
+            ))}
+          </ul>
+        )}
+        {imported > 0 && <p className="muted small">No teu horário ficam {imported} compromissos (as aulas que se repetem contam como um só, semanal).</p>}
         <button className="primary wide" disabled={busy} onClick={onSync}>{busy ? 'A sincronizar…' : 'Sincronizar agora'}</button>
         {error && <p className="small danger">{error}</p>}
         <p className="muted small">Sincroniza quando mudares o horário no Google. Enquanto a app estiver aberta, as mudanças no plano vão logo para o calendário.</p>
@@ -62,6 +70,7 @@ export function GoogleView({ settings, imported, busy, error, onConnect, onSync,
         <summary>Calendários e opções</summary>
         <fieldset className="g-cals">
           <legend>Ler eventos de</legend>
+          <p className="muted small">Se faltar algum evento, confirma que o calendário dele está marcado aqui e sincroniza de novo.</p>
           {choices.map((c) => (
             <label key={c.id} className="check">
               <input type="checkbox" checked={settings.importCalendars.includes(c.id)}

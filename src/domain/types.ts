@@ -169,6 +169,8 @@ export interface GoogleSettings {
   trainingCalendarId?: string
   /** Nomes dos teus calendários, para os mostrar sem pedir de novo ao Google */
   calendars: { id: string; name: string; primary?: boolean }[]
+  /** O que veio de cada calendário na última leitura */
+  lastImport?: { name: string; events: number; allDay: number; failed?: boolean }[]
   lastSync?: string
 }
 

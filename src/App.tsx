@@ -4,7 +4,7 @@ import { today as todayIso } from './domain/dates'
 import { computeTss } from './domain/load'
 import { generatePlan } from './domain/plan'
 import type { Activity, AppState, Plan, Profile, Session } from './domain/types'
-import { currentToken, ensureTrainingCalendar, fetchCommitments, requestToken, revoke, syncTrainings } from './google/gcal'
+import { currentToken, ensureTrainingCalendar, fetchCommitments, importSummary, requestToken, revoke, syncTrainings } from './google/gcal'
 import { useAppState } from './store'
 import { ActivitiesView } from './ui/ActivitiesView'
 import { CalendarView } from './ui/CalendarView'
@@ -114,11 +114,10 @@ export default function App() {
       if (settings.writeTrainings && token.canWrite) {
         settings = { ...settings, trainingCalendarId: await ensureTrainingCalendar(token.value, settings.trainingCalendarId) }
       }
-      const commitments = res.commitments.filter((c) => c.source === 'google')
       const nextProfile: Profile = { ...profile, schedule: { ...profile.schedule, commitments: res.commitments } }
       const reflow = reflowConflicts(plan, nextProfile, today)
 
-      const notes = [`${commitments.length} compromissos lidos do Google Calendar.`]
+      const notes = [importSummary(res.stats)]
       if (reflow.changes.length) notes.push(`${reflow.changes.length === 1 ? 'Um treino mudou' : `${reflow.changes.length} treinos mudaram`} para não ficar por cima de eventos.`, ...reflow.changes.slice(0, 2))
       if (settings.writeTrainings && !token.canWrite) notes.push('Não deste autorização para escrever no calendário, por isso os treinos não foram escritos.')
       if (settings.writeTrainings && token.canWrite && settings.trainingCalendarId) {
