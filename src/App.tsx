@@ -9,11 +9,13 @@ import { ActivitiesView } from './ui/ActivitiesView'
 import { ProfileView } from './ui/ProfileView'
 import { ProgressView } from './ui/ProgressView'
 import { WeekView } from './ui/WeekView'
+import { CalendarView } from './ui/CalendarView'
 
-type Tab = 'week' | 'progress' | 'activities' | 'profile'
+type Tab = 'week' | 'calendar' | 'progress' | 'activities' | 'profile'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'week', label: 'Semana' },
+  { id: 'calendar', label: 'Calendário' },
   { id: 'progress', label: 'Progresso' },
   { id: 'activities', label: 'Treinos' },
   { id: 'profile', label: 'Perfil' },
@@ -96,6 +98,11 @@ export default function App() {
             onSkip={(id) => applyPlan((pl, pr) => skipSession(pl, pr, id, today))}
             onUnskip={(id) => applyPlan((pl) => ({ plan: { ...pl, sessions: pl.sessions.map((s) => (s.id === id ? { ...s, skipped: false } : s)) }, changes: ['Sessão reposta no plano.'] }))}
             onDayMinutes={(d, m) => applyPlan((pl, pr) => setDayAvailability(pl, pr, d, m, today))} />
+        )}
+        {tab === 'calendar' && plan && profile && (
+          <CalendarView profile={profile} plan={plan} activities={state.activities} today={today}
+            onSkip={(id) => applyPlan((pl, pr) => skipSession(pl, pr, id, today))}
+            onUnskip={(id) => applyPlan((pl) => ({ plan: { ...pl, sessions: pl.sessions.map((s) => (s.id === id ? { ...s, skipped: false } : s)) }, changes: ['Sessão reposta no plano.'] }))} />
         )}
         {tab === 'progress' && plan && profile && <ProgressView profile={profile} plan={plan} activities={state.activities} today={today} />}
         {tab === 'activities' && (

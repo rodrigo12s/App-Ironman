@@ -17,7 +17,7 @@ interface Props {
   onUnskip: (id: string) => void
 }
 
-const STATUS: Record<SessionMatch['status'], { label: string; cls: string }> = {
+export const STATUS: Record<SessionMatch['status'], { label: string; cls: string }> = {
   planned: { label: 'Planeada', cls: 'st-planned' },
   today: { label: 'Hoje', cls: 'st-today' },
   done: { label: 'Cumprida', cls: 'st-done' },
@@ -126,7 +126,6 @@ function SessionCard({ m, profile, today, onSkip, onUnskip }: { m: SessionMatch;
   const [open, setOpen] = useState(false)
   const s = m.session
   const st = STATUS[m.status]
-  const canSkip = !s.skipped && m.activities.length === 0 && s.kind !== 'race' && s.kind !== 'fixed' && s.date >= addDaysIso(today, -6)
   return (
     <div className={`session ${s.skipped ? 'is-skipped' : ''} ${s.kind === 'race' ? 'is-race' : ''} ${s.kind === 'fixed' ? 'is-fixed' : ''}`}>
       <button className="s-main" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -140,24 +139,31 @@ function SessionCard({ m, profile, today, onSkip, onUnskip }: { m: SessionMatch;
         </div>
         <span className={`status ${st.cls}`}>{st.label}{m.ratio !== null && ` ${Math.round(m.ratio * 100)}%`}</span>
       </button>
-      {open && (
-        <div className="s-detail">
-          <ol className="steps">
-            {s.steps.map((step, i) => (
-              <li key={i}><span className={`z z${step.zone}`}>Z{step.zone}</span> {step.label} <span className="muted">· {fmtMinutes(step.minutes)}</span>
-                <span className="target">{target(step, s, profile)}</span></li>
-            ))}
-          </ol>
-          {m.activities.map((a) => (
-            <p key={a.id} className="small">Feito: {SPORT_LABEL[a.sport]} {fmtMinutes(a.durationSec / 60)}{a.distanceM ? ` · ${(a.distanceM / 1000).toFixed(1)} km` : ''} · {a.tss} TSS</p>
-          ))}
-          <div className="actions">
-            {canSkip && <button className="small" onClick={() => onSkip(s.id)}>Não consegui fazer</button>}
-            {s.skipped && !s.movedFrom && <button className="small" onClick={() => onUnskip(s.id)}>Repor no plano</button>}
-          </div>
-        </div>
-      )}
+      {open && <div className="s-detail"><SessionDetail m={m} profile={profile} today={today} onSkip={onSkip} onUnskip={onUnskip} /></div>}
     </div>
+  )
+}
+
+/** Passos com alvos, o que foi feito e as ações de uma sessão */
+export function SessionDetail({ m, profile, today, onSkip, onUnskip }: { m: SessionMatch; profile: Profile; today: string; onSkip: (id: string) => void; onUnskip: (id: string) => void }) {
+  const s = m.session
+  const canSkip = !s.skipped && m.activities.length === 0 && s.kind !== 'race' && s.kind !== 'fixed' && s.date >= addDaysIso(today, -6)
+  return (
+    <>
+      <ol className="steps">
+        {s.steps.map((step, i) => (
+          <li key={i}><span className={`z z${step.zone}`}>Z{step.zone}</span> {step.label} <span className="muted">· {fmtMinutes(step.minutes)}</span>
+            <span className="target">{target(step, s, profile)}</span></li>
+        ))}
+      </ol>
+      {m.activities.map((a) => (
+        <p key={a.id} className="small">Feito: {SPORT_LABEL[a.sport]} {fmtMinutes(a.durationSec / 60)}{a.distanceM ? ` · ${(a.distanceM / 1000).toFixed(1)} km` : ''} · {a.tss} TSS</p>
+      ))}
+      <div className="actions">
+        {canSkip && <button className="small" onClick={() => onSkip(s.id)}>Não consegui fazer</button>}
+        {s.skipped && !s.movedFrom && <button className="small" onClick={() => onUnskip(s.id)}>Repor no plano</button>}
+      </div>
+    </>
   )
 }
 

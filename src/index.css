@@ -19,6 +19,7 @@
   --c-done: #e8492b;
   --z1: #9aa5b5; --z2: #3c9be0; --z3: #2fb36b; --z4: #e8a317; --z5: #e0453a;
   --k-class: #8b7fd1; --k-gym: #d6479b; --k-football: #1f9d55; --k-work: #8a8f98; --k-other: #b08a4a;
+  --s-swim: #2f86d6; --s-bike: #23a065; --s-run: #e0732a; --s-brick: #c4562c; --s-strength: #c2479b; --s-football: #2b8a3e; --s-race: #e8492b;
   --free: #2fb36b; --win: #d9dee6;
   --ph-base: #3c9be0; --ph-build: #2fb36b; --ph-peak: #e8a317; --ph-taper: #9a6ee0; --ph-race: #e8492b;
   color-scheme: light;
@@ -220,3 +221,65 @@ h3.sub { margin: 12px 0 4px; font-size: .9rem; }
 .day-commitments { margin: 0 0 4px; }
 label > input, label > select { width: 100%; }
 .commit-fields > *, .grid2 > *, .grid3 > *, .manual > * { min-width: 0; }
+
+/* Calendário */
+.cal-toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.cal-nav { display: flex; align-items: center; gap: 8px; }
+.cal-nav b { min-width: 0; text-align: center; }
+.cal-nav button { padding: 2px 12px; font-size: 1.2rem; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 6px 12px; background: var(--surface); }
+.seg button.on { background: var(--accent); color: var(--accent-text); }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; }
+.cal-legend i.ev { position: static; display: inline-block; width: 12px; height: 10px; border-radius: 3px; vertical-align: -1px; padding: 0; }
+
+.cal-week-wrap { padding: 0; overflow-x: auto; }
+.cal-week { display: grid; grid-template-columns: 46px repeat(7, minmax(104px, 1fr)); min-width: 774px; }
+.cal-corner, .cal-dayhead { position: sticky; top: 0; background: var(--surface); z-index: 2; border-bottom: 1px solid var(--border); }
+.cal-dayhead { display: flex; flex-direction: column; align-items: center; padding: 6px 0; font-size: .78rem; color: var(--muted); }
+.cal-dayhead b { font-size: 1.05rem; color: var(--text); }
+.cal-dayhead.is-today b { background: var(--accent); color: var(--accent-text); border-radius: 999px; padding: 0 8px; }
+.cal-hours { position: relative; }
+.cal-hours span { position: absolute; right: 6px; transform: translateY(-50%); font-size: .68rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cal-hours span:first-child { transform: none; }
+.cal-col { position: relative; border-left: 1px solid var(--border); }
+.cal-col.is-today { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.cal-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
+
+.ev { position: absolute; border: 0; border-radius: 6px; padding: 2px 5px; text-align: left; overflow: hidden; color: #fff; font-size: .72rem; line-height: 1.2; display: flex; flex-direction: column; gap: 1px; cursor: pointer; }
+.ev:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.ev-time { opacity: .85; font-variant-numeric: tabular-nums; }
+.ev-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.ev-swim { background: var(--s-swim); } .ev-bike { background: var(--s-bike); } .ev-run { background: var(--s-run); }
+.ev-brick { background: var(--s-brick); } .ev-strength { background: var(--s-strength); } .ev-football { background: var(--s-football); }
+.ev-race { background: var(--s-race); } .ev-other { background: var(--k-other); }
+.ev-c { background: var(--surface-2); color: var(--text); border-left: 3px solid var(--k-class); }
+.ev-c.ev-work { border-left-color: var(--k-work); } .ev-c.ev-other { border-left-color: var(--k-other); background: var(--surface-2); }
+.ev-key { box-shadow: inset 0 0 0 2px rgba(255,255,255,.55); }
+.ev-skipped { opacity: .4; text-decoration: line-through; }
+.ev-done::after { content: "✓"; position: absolute; top: 2px; right: 4px; font-weight: 700; }
+.ev-missed { outline: 2px dashed var(--danger); outline-offset: -2px; }
+
+.cal-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); padding: 0; overflow: hidden; }
+.cal-mhead { font-size: .75rem; color: var(--muted); text-align: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.cal-cell { min-height: 92px; border-top: 1px solid var(--grid); border-left: 1px solid var(--grid); padding: 3px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cal-cell:nth-child(7n + 1) { border-left: 0; }
+.cal-cell.other { background: var(--surface-2); }
+.cal-cell.other > * { opacity: .55; }
+.cal-date { align-self: flex-start; border: 0; background: none; padding: 0 4px; font-size: .78rem; font-weight: 600; }
+.cal-cell.is-today .cal-date { background: var(--accent); color: var(--accent-text); border-radius: 999px; }
+.chip-ev { position: static; padding: 1px 4px; border-radius: 4px; }
+.chip-ev .ev-title { -webkit-line-clamp: 1; font-size: .68rem; }
+.chip-ev.ev-done::after { top: 0; right: 2px; font-size: .65rem; }
+.cal-others { padding-left: 2px; }
+@media (max-width: 520px) { .cal-others { display: block; height: 7px; border-radius: 3px; background: var(--k-class); opacity: .45; } .cal-others .txt { display: none; } .cal-cell { min-height: 64px; } .chip-ev { height: 7px; padding: 0; } .chip-ev .ev-title { display: none; } .chip-ev.ev-done::after { display: none; } }
+
+.sheet-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(10, 12, 16, .45); display: flex; align-items: flex-end; justify-content: center; }
+@media (min-width: 640px) { .sheet-backdrop { align-items: center; } }
+.sheet { background: var(--surface); width: 100%; max-width: 560px; max-height: 85vh; overflow-y: auto; border-radius: 16px 16px 0 0; padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 10px; }
+@media (min-width: 640px) { .sheet { border-radius: 16px; } }
+.sheet header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.sheet header h2 { margin: 0; }
+.chips.left { justify-content: flex-start; margin-top: 0; align-items: center; }
+.ev-short { flex-direction: row; gap: 4px; align-items: center; white-space: nowrap; }
+.ev-short .ev-title { display: block; text-overflow: ellipsis; }

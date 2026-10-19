@@ -11,6 +11,8 @@ Aplicação web para preparar o primeiro Ironman. Tudo corre no browser e os dad
 - **Importação de ficheiros .FIT** (Garmin, Wahoo, Coros, Zwift) e registo manual, com associação automática à sessão planeada e percentagem de cumprimento (`src/domain/fit.ts`, `src/domain/compliance.ts`).
 - **Forma, fadiga e frescura** (CTL/ATL/TSB) com projeção até ao dia da prova e alertas de subida de carga, fadiga e volume de corrida (`src/domain/load.ts`).
 
+- **Calendário**: vista de semana e de mês com treinos, aulas, exames, ginásio e futebol juntos; ao tocar num evento abrem os detalhes e as ações (`src/ui/CalendarView.tsx`).
+
 ## Desenvolvimento
 ```
 npm install
