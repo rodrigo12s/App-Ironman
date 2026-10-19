@@ -11,11 +11,12 @@ interface Props {
   onAdd: (a: Activity[]) => void
   onDelete: (id: string) => void
   onRestore: (s: AppState) => void
+  section: 'activities' | 'backup'
 }
 
 const METHOD: Record<Activity['tssMethod'], string> = { power: 'potência', pace: 'ritmo', hr: 'FC', estimate: 'estimativa' }
 
-export function ActivitiesView({ state, onAdd, onDelete, onRestore }: Props) {
+export function ActivitiesView({ state, onAdd, onDelete, onRestore, section }: Props) {
   const [messages, setMessages] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
   const [backupText, setBackupText] = useState<string | null>(null)
@@ -41,6 +42,7 @@ export function ActivitiesView({ state, onAdd, onDelete, onRestore }: Props) {
 
   return (
     <div className="stack">
+      {section === 'activities' && <>
       <section className="card">
         <h2>Importar treinos</h2>
         <div
@@ -88,7 +90,9 @@ export function ActivitiesView({ state, onAdd, onDelete, onRestore }: Props) {
         </ul>
       </section>
 
-      <section className="card">
+      </>}
+
+      {section === 'backup' && <section className="card">
         <h2>Cópia de segurança</h2>
         <p className="muted small">Os dados ficam guardados só neste browser. Guarda uma cópia de vez em quando para não os perderes: exporta um ficheiro ou copia o texto e guarda-o numa nota.</p>
         <div className="actions">
@@ -122,7 +126,7 @@ export function ActivitiesView({ state, onAdd, onDelete, onRestore }: Props) {
             </div>
           </div>
         )}
-      </section>
+      </section>}
     </div>
   )
 }
@@ -130,8 +134,8 @@ export function ActivitiesView({ state, onAdd, onDelete, onRestore }: Props) {
 function ManualForm({ profile, onAdd }: { profile: Profile | null; onAdd: (a: Activity) => void }) {
   const [f, setF] = useState({ date: todayIso(), sport: 'run' as Activity['sport'], minutes: 60, km: '', hr: '', watts: '' })
   return (
-    <section className="card">
-      <h2>Registar à mão</h2>
+    <details className="card">
+      <summary><b>Registar um treino à mão</b></summary>
       <form className="manual" onSubmit={(e) => {
         e.preventDefault()
         const durationSec = f.minutes * 60
@@ -163,6 +167,6 @@ function ManualForm({ profile, onAdd }: { profile: Profile | null; onAdd: (a: Ac
         {f.sport === 'bike' && <label>Potência média (W)<input type="number" value={f.watts} onChange={(e) => setF({ ...f, watts: e.target.value })} /></label>}
         <button className="primary" type="submit">Adicionar</button>
       </form>
-    </section>
+    </details>
   )
 }

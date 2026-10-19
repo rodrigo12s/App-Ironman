@@ -145,26 +145,51 @@ function SessionCard({ m, profile, today, onSkip, onUnskip }: { m: SessionMatch;
 }
 
 /** Passos com alvos, o que foi feito e as ações de uma sessão */
-export function SessionDetail({ m, profile, today, onSkip, onUnskip }: { m: SessionMatch; profile: Profile; today: string; onSkip: (id: string) => void; onUnskip: (id: string) => void }) {
+export function SessionDetail({ m, profile, today, onSkip, onUnskip, onDone }: { m: SessionMatch; profile: Profile; today: string; onSkip: (id: string) => void; onUnskip: (id: string) => void; onDone?: (s: Session) => void }) {
   const s = m.session
   const canSkip = !s.skipped && m.activities.length === 0 && s.kind !== 'race' && s.kind !== 'fixed' && s.date >= addDaysIso(today, -6)
   return (
     <>
       <ol className="steps">
-        {s.steps.map((step, i) => (
-          <li key={i}><span className={`z z${step.zone}`}>Z{step.zone}</span> {step.label} <span className="muted">· {fmtMinutes(step.minutes)}</span>
-            <span className="target">{target(step, s, profile)}</span></li>
+        {groupSteps(s.steps).map((g, i) => (
+          <li key={i}><span className={`z z${g.step.zone}`}>Z{g.step.zone}</span>{' '}
+            {g.reps > 1
+              ? <>{g.reps} × {g.label} {fmtMinutes(g.step.minutes)}{g.rest && <span className="muted"> + {fmtMinutes(g.rest.minutes)} a recuperar</span>}</>
+              : <>{g.step.label} <span className="muted">· {fmtMinutes(g.step.minutes)}</span></>}
+            <span className="target">{target(g.step, s, profile)}</span></li>
         ))}
       </ol>
       {m.activities.map((a) => (
         <p key={a.id} className="small">Feito: {SPORT_LABEL[a.sport]} {fmtMinutes(a.durationSec / 60)}{a.distanceM ? ` · ${(a.distanceM / 1000).toFixed(1)} km` : ''} · {a.tss} TSS</p>
       ))}
       <div className="actions">
+        {canSkip && onDone && s.date <= today && <button className="primary small" onClick={() => onDone(s)}>Já fiz</button>}
         {canSkip && <button className="small" onClick={() => onSkip(s.id)}>Não consegui fazer</button>}
         {s.skipped && !s.movedFrom && <button className="small" onClick={() => onUnskip(s.id)}>Repor no plano</button>}
       </div>
     </>
   )
+}
+
+/** Junta séries repetidas ("Aceleração 1/6", "Recuperação", …) numa só linha: "6 × Aceleração" */
+function groupSteps(steps: Step[]): { step: Step; reps: number; label: string; rest?: Step }[] {
+  const out: { step: Step; reps: number; label: string; rest?: Step }[] = []
+  for (let i = 0; i < steps.length; i++) {
+    const m = steps[i].label.match(/^(.*) (\d+)\/(\d+)$/)
+    if (m && m[2] === '1') {
+      const reps = Number(m[3])
+      const rest = steps[i + 1]?.label === 'Recuperação' ? steps[i + 1] : undefined
+      const stride = rest ? 2 : 1
+      const fits = Array.from({ length: reps }, (_, k) => steps[i + k * stride]?.label === `${m[1]} ${k + 1}/${reps}`).every(Boolean)
+      if (fits) {
+        out.push({ step: steps[i], reps, label: m[1], rest })
+        i += reps * stride - 1
+        continue
+      }
+    }
+    out.push({ step: steps[i], reps: 1, label: steps[i].label })
+  }
+  return out
 }
 
 /** Alvo concreto (W, ritmo ou FC) para a zona de um passo */

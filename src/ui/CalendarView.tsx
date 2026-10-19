@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { addDaysIso, mondayOf } from '../domain/dates'
 import { matchSessions, type SessionMatch } from '../domain/compliance'
 import { commitmentsOn, toHHMM } from '../domain/schedule'
-import type { Activity, Commitment, Plan, Profile } from '../domain/types'
+import type { Activity, Commitment, Plan, Profile, Session } from '../domain/types'
 import { KIND_LABEL } from './ScheduleGrid'
 import { SessionDetail, STATUS } from './WeekView'
 import { SPORT_ICON, SPORT_LABEL, WEEKDAYS, fmtDay, fmtMinutes } from './format'
@@ -14,9 +14,10 @@ interface Props {
   today: string
   onSkip: (id: string) => void
   onUnskip: (id: string) => void
+  onDone: (s: Session) => void
 }
 
-type CalEvent =
+export type CalEvent =
   | { type: 'session'; id: string; date: string; start: number; end: number; m: SessionMatch }
   | { type: 'commitment'; id: string; date: string; start: number; end: number; c: Commitment }
   | { type: 'activity'; id: string; date: string; start: number; end: number; a: Activity }
@@ -82,7 +83,7 @@ function lanes(events: CalEvent[]): Map<string, { lane: number; of: number }> {
   return out
 }
 
-export function CalendarView({ profile, plan, activities, today, onSkip, onUnskip }: Props) {
+export function CalendarView({ profile, plan, activities, today, onSkip, onUnskip, onDone }: Props) {
   const [mode, setMode] = useState<'week' | 'month'>(() => {
     try { return (localStorage.getItem('ironman-cal-mode') as 'week' | 'month') || 'week' } catch { return 'week' }
   })
@@ -135,7 +136,7 @@ export function CalendarView({ profile, plan, activities, today, onSkip, onUnski
             onDay={(d) => { setAnchor(d); setMode('week') }} />}
 
       {sel && <DetailSheet e={sel} profile={profile} today={today} onClose={() => setSelected(null)}
-        onSkip={(id) => { onSkip(id); setSelected(null) }} onUnskip={(id) => { onUnskip(id); setSelected(null) }} />}
+        onSkip={(id) => { onSkip(id); setSelected(null) }} onUnskip={(id) => { onUnskip(id); setSelected(null) }} onDone={onDone} />}
     </div>
   )
 }
@@ -219,7 +220,7 @@ function MonthGrid({ from, month, events, today, onSelect, onDay }: { from: stri
   )
 }
 
-function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip }: { e: CalEvent; profile: Profile; today: string; onClose: () => void; onSkip: (id: string) => void; onUnskip: (id: string) => void }) {
+export function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip, onDone }: { e: CalEvent; profile: Profile; today: string; onClose: () => void; onSkip: (id: string) => void; onUnskip: (id: string) => void; onDone?: (s: Session) => void }) {
   const closeRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     closeRef.current?.focus()
@@ -248,7 +249,7 @@ function DetailSheet({ e, profile, today, onClose, onSkip, onUnskip }: { e: CalE
               <span className="chip">{e.m.session.plannedTss} TSS</span>
             </div>
             {e.m.session.movedFrom && <p className="small muted">Movida de {fmtDay(e.m.session.movedFrom)}.</p>}
-            <SessionDetail m={e.m} profile={profile} today={today} onSkip={onSkip} onUnskip={onUnskip} />
+            <SessionDetail m={e.m} profile={profile} today={today} onSkip={onSkip} onUnskip={onUnskip} onDone={onDone && ((s) => { onDone(s); onClose() })} />
           </>
         )}
         {e.type === 'commitment' && (

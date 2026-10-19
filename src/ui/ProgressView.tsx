@@ -19,6 +19,15 @@ export function ProgressView({ profile, plan, activities, today }: Props) {
   const series = useMemo(() => loadSeries(activities, plan, from, profile.raceDate, today), [activities, plan, from, profile.raceDate, today])
   const alerts = useMemo(() => loadAlerts(series, activities, today), [series, activities, today])
   const now = series.find((p) => p.date === today)
+  const idxToday = series.findIndex((p) => p.date === today)
+  const weekAgo = idxToday >= 7 ? series[idxToday - 7] : undefined
+  const delta = now && weekAgo ? now.ctl - weekAgo.ctl : 0
+  const trendText = !now || activities.length === 0
+    ? 'Ainda sem treinos registados.'
+    : delta > 7 ? `Subiste ${delta.toFixed(0)} pontos esta semana. É demais: abranda um pouco.`
+    : delta > 1 ? `Subiste ${delta.toFixed(0)} pontos esta semana. Estás no bom caminho.`
+    : delta < -3 ? `Desceste ${Math.abs(delta).toFixed(0)} pontos esta semana. Normal numa semana leve.`
+    : 'Estável esta semana.'
   const race = series.at(-1)
 
   const chartData = series
@@ -49,16 +58,17 @@ export function ProgressView({ profile, plan, activities, today }: Props) {
 
   return (
     <div className="stack">
-      <section className="card">
-        <h2>Como estás</h2>
-        <div className="kpis">
-          <Kpi label="Forma (CTL)" value={now?.ctl.toFixed(0) ?? '–'} hint="Média da carga dos últimos 42 dias" />
-          <Kpi label="Fadiga (ATL)" value={now?.atl.toFixed(0) ?? '–'} hint="Média dos últimos 7 dias" />
-          <Kpi label="Frescura (TSB)" value={now?.tsb.toFixed(0) ?? '–'} hint="Forma menos fadiga" />
-          <Kpi label="No dia da prova" value={race ? `${race.ctl.toFixed(0)} / ${race.tsb >= 0 ? '+' : ''}${race.tsb.toFixed(0)}` : '–'} hint="Forma / frescura previstas se cumprires o plano" />
+      <h1 className="screen-title">Progresso</h1>
+      <section className="card fitness">
+        <h2 className="eyebrow">A tua forma</h2>
+        <div className="fitness-main">
+          <b className="big-num">{now ? now.ctl.toFixed(0) : '–'}</b>
+          <div>
+            <p>{trendText}</p>
+            <p className="muted small">{race ? `Se cumprires o plano, chegas à prova com forma ${race.ctl.toFixed(0)} e frescura ${race.tsb >= 0 ? '+' : ''}${race.tsb.toFixed(0)}.` : ''}</p>
+          </div>
         </div>
-        {activities.length === 0 && <p className="muted">Importa os teus treinos para veres a tua forma real. Até lá, o gráfico mostra o que o plano prevê.</p>}
-        {race && race.tsb < 5 && <p className="warn-text small">A frescura prevista para a prova está baixa. O ideal é chegar entre +5 e +25.</p>}
+        {activities.length === 0 && <p className="muted small">Importa os teus treinos para veres a tua forma real.</p>}
       </section>
 
       {alerts.length > 0 && (
@@ -69,7 +79,15 @@ export function ProgressView({ profile, plan, activities, today }: Props) {
         </section>
       )}
 
-      <section className="card">
+      <details className="card more">
+        <summary>Ver gráficos e detalhes</summary>
+        <div className="kpis">
+          <Kpi label="Forma (CTL)" value={now?.ctl.toFixed(0) ?? '–'} hint="Média da carga dos últimos 42 dias" />
+          <Kpi label="Fadiga (ATL)" value={now?.atl.toFixed(0) ?? '–'} hint="Média dos últimos 7 dias" />
+          <Kpi label="Frescura (TSB)" value={now?.tsb.toFixed(0) ?? '–'} hint="Forma menos fadiga" />
+          <Kpi label="No dia da prova" value={race ? `${race.ctl.toFixed(0)} / ${race.tsb >= 0 ? '+' : ''}${race.tsb.toFixed(0)}` : '–'} hint="Forma / frescura previstas" />
+        </div>
+      <section className="sub-section">
         <h2>Forma, fadiga e frescura</h2>
         <div className="chart">
           <ResponsiveContainer width="100%" height={280}>
@@ -94,7 +112,7 @@ export function ProgressView({ profile, plan, activities, today }: Props) {
         <p className="muted small">A forma deve subir de forma gradual (até 5 a 7 pontos por semana). No taper a fadiga desce e a frescura fica positiva para o dia da prova.</p>
       </section>
 
-      <section className="card">
+      <section className="sub-section">
         <h2>Fases do plano</h2>
         <div className="phase-strip">
           {phases.map((p, i) => (
@@ -119,6 +137,7 @@ export function ProgressView({ profile, plan, activities, today }: Props) {
           </ResponsiveContainer>
         </div>
       </section>
+      </details>
     </div>
   )
 }

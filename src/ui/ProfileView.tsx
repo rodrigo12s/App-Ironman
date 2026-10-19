@@ -72,10 +72,11 @@ interface Props {
   profile: Profile | null
   legacy?: Pick<Profile, 'raceName' | 'raceDate' | 'tests'>
   hasPlan: boolean
+  initialStep?: number
   onSave: (p: Profile, regenerate: boolean) => void
 }
 
-export function ProfileView({ profile, legacy, hasPlan, onSave }: Props) {
+export function ProfileView({ profile, legacy, hasPlan, initialStep, onSave }: Props) {
   const [p, setP] = useState<Profile>(() => {
     if (profile) return profile
     try {
@@ -84,7 +85,7 @@ export function ProfileView({ profile, legacy, hasPlan, onSave }: Props) {
     } catch { /* sem rascunho */ }
     return { ...defaultProfile(), ...(legacy ?? {}) }
   })
-  const [step, setStep] = useState(profile ? STEPS.length - 1 : 0)
+  const [step, setStep] = useState(initialStep ?? 0)
   useEffect(() => {
     if (profile) return
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(p)) } catch { /* sem armazenamento */ }
@@ -232,7 +233,7 @@ export function ProfileView({ profile, legacy, hasPlan, onSave }: Props) {
 
       {step === 5 && <TestsStep tests={p.tests} athlete={p.athlete} onChange={(tests) => setP({ ...p, tests })} />}
 
-      <section className="card summary">
+      {(step === 3 || step === 4) && <section className="card summary">
         <h2>A tua semana</h2>
         <ScheduleGrid schedule={p.schedule} week={mondayOf(p.planStart)} />
         <p className={freeTotal < 600 ? 'warn-text small' : 'muted small'}>
@@ -240,7 +241,7 @@ export function ProfileView({ profile, legacy, hasPlan, onSave }: Props) {
           {freeTotal < 600 && ' Com menos de 10 h livres o Ironman fica muito apertado. Tenta ter um dia de fim de semana com 5 a 6 h.'}
           {!free.some((m) => m >= 240) && ' Não há nenhum dia com 4 h seguidas para a bicicleta longa.'}
         </p>
-      </section>
+      </section>}
 
       <div className="actions wizard-actions">
         {step > 0 && <button onClick={() => setStep(step - 1)}>Anterior</button>}
